@@ -1,0 +1,7 @@
+MOV Ax,5
+ADD Bx,7
+SUB Cx,4
+MUL Dx,2
+DIV Ax,2
+INC Bx
+DEC Cx
