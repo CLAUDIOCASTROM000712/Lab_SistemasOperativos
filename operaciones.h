@@ -1,3 +1,5 @@
+#ifndef OPERACIONES_H
+#define OPERACIONES_H
 int mov(int a, int b);
 int add(int a, int b);
 int sub(int a, int b);
@@ -36,7 +38,7 @@ int dec(int a){
     return a;
 }
 
-
+#endif
 
 
 
