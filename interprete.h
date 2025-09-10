@@ -70,7 +70,7 @@ int ejecutar_archivo(const char *ruta) {
         if (linea[0] == ';' || linea[0] == '\0') {   // === NUEVO === ignora comentarios y vacías
             continue;
         }
-        /*
+        
         token = strtok(linea, delimitador);
         if (!token) continue;
         strncpy(copia, token, sizeof(copia)); copia[sizeof(copia)-1] = '\0';
@@ -95,19 +95,13 @@ int ejecutar_archivo(const char *ruta) {
             }
             token = strtok(NULL, delimitador);
             i++;
-        }*/
-
-        token = strtok(linea, delimitador);
-        while (token != NULL) {
-            if (i==0) { strncpy(inst, token, sizeof(inst)); inst[sizeof(inst)-1] = '\0'; }
-            if (i==1) { strncpy(var,  token, sizeof(var));  var[sizeof(var)-1]  = '\0'; }
-            if (i==2) { strncpy(val,  token, sizeof(val));  val[sizeof(val)-1]  = '\0'; }
-            if (i>0) strcat(IR," ");
-            strcat(IR, token);
-            token = strtok(NULL, delimitador);
-            i++;
         }
 
+        
+        /*
+            comparaciones de las variables instruccion en el incremento y decremento que ejecuta el status de operando incorrecto
+            en mi caso seria lo de la validacion del status que me arroja error:operando incorrecto
+        */
         // === VALIDACIONES ===
         if ((strcmp(inst,"INC")==0 || strcmp(inst,"DEC")==0)) {
             if (i != 2) strcpy(status,"operando incorrecto");
@@ -119,6 +113,7 @@ int ejecutar_archivo(const char *ruta) {
             strcpy(status,"Registro invalido");
         }
 
+        /*comparacion con la variable valor para verificar el status cuando se le asigna un numero o letra*/ 
         int valor = 0;
         if (strcmp(status,"Correcto")==0 && (i==3)) {
             if (!Numero(val)) {
@@ -191,7 +186,7 @@ int ejecutar_archivo(const char *ruta) {
             }
         }
         Pc++;
-        printf("Ax = %d     Bx = %d     Cx = %d     Dx = %d       Pc = %d       IR = %s        %s                           %s\n",Ax, Bx, Cx, Dx, Pc, IR, status,ruta);
+        printf("  %d           %d            %d            %d            %d        %s        %s                           %s\n",Ax, Bx, Cx, Dx, Pc, IR, status,ruta);
     }
 
     fclose(archivo);
