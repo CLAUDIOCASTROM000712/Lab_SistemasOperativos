@@ -1,18 +1,23 @@
-#ifndef interprete_h
-#define interprete_h
-#include<stdio.h> 
-#include<stdlib.h>
-#include<string.h>
-#include "operaciones.h"
+#ifndef interprete_h //guarda de inclusiones (ifndef, define, endif)
+#define interprete_h //guarda de inclusiones
+#include<stdio.h> //libreria de entrada/salida
+#include<stdlib.h> //libreria de utilidades generales(malloc, atoi, etc).
+#include<string.h> //libreria de strings osea cadenas
+#include "operaciones.h" //incluyo la libreria de ecabezado de operaciones
   
 /*** Prototipo de la funcion === */
-static void rtrim(char *s);
-static int RegistroValido(const char *var);
-static int Numero(const char *s);
-int ejecutar_archivo(const char *ruta);
+static void rtrim(char *s); //elimina saltos de linea al final de cada string leido
+static int RegistroValido(const char *var);//verifica si el registro es valido
+static int Numero(const char *s);//verifica si el string es un numero
+int ejecutar_archivo(const char *ruta);//funcion que ejecuta un archivo asm
 
 /* === NUEVO ===
    Utilidad para limpiar salto de línea al final de cada string leído.
+   Recibe una cadena.
+
+    Busca al final caracteres de salto de línea (\n o \r) y los reemplaza por \0.
+
+    Se usa para limpiar líneas leídas de un archivo.
 */
 static void rtrim(char *s) {
     size_t n = strlen(s);
@@ -21,10 +26,27 @@ static void rtrim(char *s) {
 
 /*=== NUEVO ===
 funciones para poder hacer la validacion de los status
+ Devuelve 1 si var es "Ax", "Bx", "Cx" o "Dx".
+
+ Devuelve 0 en caso contrario.
+
+ Sirve para validar que los operandos sean registros válidos.
 */ 
 static int RegistroValido(const char *var){
     return (strcmp(var,"Ax")==0 || strcmp(var,"Bx")==0 || strcmp(var,"Cx")==0 || strcmp(var,"Dx")==0);
 }
+
+/*=== NUEVO ===
+la funcion numero hace lo siguiente:
+ Comprueba si la cadena representa un número entero.
+
+ Acepta opcionalmente un - al inicio para números negativos.
+
+ Si encuentra un carácter que no es dígito → devuelve 0.
+
+ Si todo es correcto → devuelve 1.
+
+*/
 static int Numero(const char *s){
     if(s == 0){
         return 0; //vacio no es numero
@@ -44,24 +66,37 @@ static int Numero(const char *s){
    - Antes, tu main abría directamente "a.asm".
    - Ahora movimos toda esa lógica aquí para poder invocarla desde la consola.
 */
+//Función principal que procesa un archivo .asm y simula registros (Ax, Bx, Cx, Dx) y un contador de programa (Pc).
 int ejecutar_archivo(const char *ruta) {
-    int Ax=0, Bx=0, Cx=0, Dx=0, Pc=1;
-    char linea[128];
-    char inst[4], var[3], val[16], copia[4];
-    char IR[32];
-    char *delimitador = (char *)" ,";
-    char *token;
-    char status[64];
+    int Ax=0, Bx=0, Cx=0, Dx=0, Pc=1;   //variables de registros
+    char linea[128]; //buffer de lectura
+    char inst[4], var[3], val[16], copia[4]; //variables auxiliares
+    char IR[32]; //registro de instruccion
+    char *delimitador = (char *)" ,"; //delimitador de cadenas
+    char *token; //puntero para tokenizar
+    char status[64]; //estatus de la instruccion
     //char proceso[64];
 
+    //funcion que abre un archivo y lo lee
     FILE *archivo = fopen(ruta, "r");
     if (archivo == NULL) {
         printf("No se pudo abrir el archivo: %s\n", ruta);
         return 1;
     }
 
+    //imprime el encabezado de la tabla.
     printf("Ax          Bx           Cx          Dx         Pc          IR                  Status                              Proceso\n");
 
+    /*
+     Leer línea por línea:
+
+     Se usa fgets(linea, sizeof(linea), archivo).
+
+     Se limpia la línea con rtrim(linea).
+
+     Si la línea es comentario (;...) o está vacía → se omite.
+    
+    */
     while (fgets(linea, sizeof(linea), archivo) != NULL) {
         int i = 0;
         strcpy(IR, "");
@@ -71,6 +106,14 @@ int ejecutar_archivo(const char *ruta) {
             continue;
         }
         
+        //token es un puntero para tokenizar
+        /*
+            Tokenización (strtok):
+
+            Se separa en inst (instrucción), var (registro), val (valor).
+
+            Se reconstruye el IR concatenando la instrucción y sus operandos.
+        */
         token = strtok(linea, delimitador);
         if (!token) continue;
         strncpy(copia, token, sizeof(copia)); copia[sizeof(copia)-1] = '\0';
@@ -122,7 +165,15 @@ int ejecutar_archivo(const char *ruta) {
                 valor = atoi(val);
             }
         }
+        /*
+            Ejecución de la instrucción:
 
+            Se compara inst con cadenas (MOV, ADD, SUB, MUL, DIV, INC, DEC).
+
+            Dependiendo del registro (Ax, Bx, Cx, Dx), se ejecuta la operación con las funciones de operaciones.h.
+
+            Si la instrucción o registro es inválido → status = "Instruccion invalida" o "Registro inválido".
+        */
         //int valor = (i >= 3) ? atoi(val) : 0;
         if(strcmp(status,"Correcto")==0) {
             if (strcmp(inst, "MOV") == 0) {
@@ -185,10 +236,15 @@ int ejecutar_archivo(const char *ruta) {
                 strcpy(status,"Instruccion invalida");
             }
         }
-        Pc++;
+        Pc++; //actualiza el contador de programa
+        //muestra el resultado de la tabla en pantalla.
         printf("  %d           %d            %d            %d            %d        %s        %s                           %s\n",Ax, Bx, Cx, Dx, Pc, IR, status,ruta);
+        
+
     }
 
+    
+    //cierra el archivo.
     fclose(archivo);
     return 0;
 }
