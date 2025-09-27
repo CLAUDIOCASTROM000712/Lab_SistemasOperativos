@@ -10,7 +10,7 @@ Equipo #6: Claudio Castro Murillo, Oscar Amador Aguilar Calvillo, Brandon Hernan
 Semestre: 2025-2026
 */
 
-/* === NUEVO ===
+/* 
    Consola interactiva: 'ejecuta <archivo>' y 'salir'.
    - Esto reemplaza el main que antes abría de golpe "a.asm".
 */
