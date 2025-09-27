@@ -4,14 +4,17 @@
 #include<stdlib.h> //libreria de utilidades generales(malloc, atoi, etc).
 #include<string.h> //libreria de strings osea cadenas
 #include "operaciones.h" //incluyo la libreria de ecabezado de operaciones
-  
+#include<ncurses.h>//incluí la librería ncurses
+#include<unistd.h>//para usleep
+
+
 /*** Prototipo de la funcion === */
 static void rtrim(char *s); //elimina saltos de linea al final de cada string leido
 static int RegistroValido(const char *var);//verifica si el registro es valido
 static int Numero(const char *s);//verifica si el string es un numero
 int ejecutar_archivo(const char *ruta);//funcion que ejecuta un archivo asm
 
-/* === NUEVO ===
+/* 
    Utilidad para limpiar salto de línea al final de cada string leído.
    Recibe una cadena.
 
@@ -24,7 +27,7 @@ static void rtrim(char *s) {
     while (n && (s[n-1] == '\n' || s[n-1] == '\r')) { s[--n] = '\0'; }
 }
 
-/*=== NUEVO ===
+/*
 funciones para poder hacer la validacion de los status
  Devuelve 1 si var es "Ax", "Bx", "Cx" o "Dx".
 
@@ -36,7 +39,7 @@ static int RegistroValido(const char *var){
     return (strcmp(var,"Ax")==0 || strcmp(var,"Bx")==0 || strcmp(var,"Cx")==0 || strcmp(var,"Dx")==0);
 }
 
-/*=== NUEVO ===
+/*
 la funcion numero hace lo siguiente:
  Comprueba si la cadena representa un número entero.
 
@@ -61,7 +64,7 @@ static int Numero(const char *s){
     return 1; // es un número válido
 }
 
-/* === NUEVO ===
+/* 
    Función que ejecuta un archivo .asm.
    - Antes, tu main abría directamente "a.asm".
    - Ahora movimos toda esa lógica aquí para poder invocarla desde la consola.
@@ -83,9 +86,20 @@ int ejecutar_archivo(const char *ruta) {
         printf("No se pudo abrir el archivo: %s\n", ruta);
         return 1;
     }
+    //agregamos las funciones ncurses
+    initscr();//inicialicé la pantalla de ncurses
+    noecho();//no muestra lo que se escribe 
+    curs_set(0);//oculté el cursor, cuestión estética
 
     //imprime el encabezado de la tabla.
-    printf("Ax          Bx           Cx          Dx         Pc          IR                  Status                              Proceso\n");
+    //printf("Ax          Bx           Cx          Dx         Pc          IR                  Status                              Proceso\n");
+
+    //Dibuja la cabecera en la fila 0
+    mvprintw(0, 0, "Ax        Bx        Cx        Dx        Pc        IR                  Status");
+    //Dibuja una línea separadora en la fila 1
+    mvprintw(1, 0, "======================================================================================");
+
+    int fila = 2; //Empezaremos a imprimir en la fila 2
 
     /*
      Leer línea por línea:
@@ -101,8 +115,8 @@ int ejecutar_archivo(const char *ruta) {
         int i = 0;
         strcpy(IR, "");
         strcpy(status,"Correcto");
-        rtrim(linea);                                // === NUEVO === limpia \n
-        if (linea[0] == ';' || linea[0] == '\0') {   // === NUEVO === ignora comentarios y vacías
+        rtrim(linea);                                // limpia \n
+        if (linea[0] == ';' || linea[0] == '\0') {   // ignora comentarios y vacías
             continue;
         }
         
@@ -145,7 +159,7 @@ int ejecutar_archivo(const char *ruta) {
             comparaciones de las variables instruccion en el incremento y decremento que ejecuta el status de operando incorrecto
             en mi caso seria lo de la validacion del status que me arroja error:operando incorrecto
         */
-        // === VALIDACIONES ===
+       
         if ((strcmp(inst,"INC")==0 || strcmp(inst,"DEC")==0)) {
             if (i != 2) strcpy(status,"operando incorrecto");
         } else {
@@ -206,7 +220,7 @@ int ejecutar_archivo(const char *ruta) {
                 else strcpy(status,"Registro inválido");
             }
             else if (strcmp(inst, "DIV") == 0) {
-                // === NUEVO === manejo seguro de división entre 0
+                //manejo seguro de división entre 0
                 if (valor == 0) {
                     strcpy(status,"División por cero");
                 } else {
@@ -238,11 +252,20 @@ int ejecutar_archivo(const char *ruta) {
         }
         Pc++; //actualiza el contador de programa
         //muestra el resultado de la tabla en pantalla.
-        printf("  %d           %d            %d            %d            %d        %s        %s                           %s\n",Ax, Bx, Cx, Dx, Pc, IR, status,ruta);
+        //printf("  %d           %d            %d            %d            %d        %s        %s                           %s\n",Ax, Bx, Cx, Dx, Pc, IR, status,ruta);
+
+        mvprintw(fila, 0, "%-10d%-10d%-10d%-10d%-10d%-23s%s", Ax, Bx, Cx, Dx, Pc, IR, status);//BHimprime los registros en la fila correspondiente
+        fila++; //Prepara la siguiente línea
+        refresh();//Actualiza la pantalla para mostrar los cambios
+        
+        usleep(500000);//Pausa de 500,000 microsegundos (medio segundo)
         
 
     }
+    mvprintw(fila + 1, 0, "Ejecucion finalizada. Presiona una tecla para salir.");//Informa al usuario que la ejecución ha finalizado
+    getch(); //Espera a que el usuario presione una tecla antes de cerrar
 
+    endwin();//Cierra la pantalla de ncurses
     
     //cierra el archivo.
     fclose(archivo);
