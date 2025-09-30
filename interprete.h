@@ -71,63 +71,41 @@ static int Numero(const char *s){
 */
 //Función principal que procesa un archivo .asm y simula registros (Ax, Bx, Cx, Dx) y un contador de programa (Pc).
 int ejecutar_archivo(const char *ruta) {
-    int Ax=0, Bx=0, Cx=0, Dx=0, Pc=1;   //variables de registros
-    char linea[128]; //buffer de lectura
-    char inst[4], var[3], val[16], copia[4]; //variables auxiliares
-    char IR[32]; //registro de instruccion
-    char *delimitador = (char *)" ,"; //delimitador de cadenas
-    char *token; //puntero para tokenizar
-    char status[64]; //estatus de la instruccion
-    //char proceso[64];
+    int Ax=0, Bx=0, Cx=0, Dx=0, Pc=1;   // registros
+    char linea[128]; 
+    char inst[8], var[8], val[16], copia[8]; 
+    char IR[32]; 
+    char *delimitador = (char *)" ,"; 
+    char *token; 
+    char status[64]; 
 
-    //funcion que abre un archivo y lo lee
     FILE *archivo = fopen(ruta, "r");
     if (archivo == NULL) {
         printf("No se pudo abrir el archivo: %s\n", ruta);
         return 1;
     }
-    //agregamos las funciones ncurses
-    initscr();//inicialicé la pantalla de ncurses
-    noecho();//no muestra lo que se escribe 
-    curs_set(0);//oculté el cursor, cuestión estética
 
-    //imprime el encabezado de la tabla.
-    //printf("Ax          Bx           Cx          Dx         Pc          IR                  Status                              Proceso\n");
+    // inicializa ncurses
+    initscr();
+    noecho();
+    curs_set(0);
 
-    //Dibuja la cabecera en la fila 0
-    mvprintw(0, 0, "Ax        Bx        Cx        Dx        Pc        IR                  Status");
-    //Dibuja una línea separadora en la fila 1
+    // encabezado
+    mvprintw(0, 0, "ID   Ax        Bx        Cx        Dx        Pc        IR                  Status");
     mvprintw(1, 0, "======================================================================================");
 
-    int fila = 2; //Empezaremos a imprimir en la fila 2
+    int fila = 2; 
+    int id = 1; // contador autoincremental
 
-    /*
-     Leer línea por línea:
-
-     Se usa fgets(linea, sizeof(linea), archivo).
-
-     Se limpia la línea con rtrim(linea).
-
-     Si la línea es comentario (;...) o está vacía → se omite.
-    
-    */
     while (fgets(linea, sizeof(linea), archivo) != NULL) {
         int i = 0;
         strcpy(IR, "");
         strcpy(status,"Correcto");
-        rtrim(linea);                                // limpia \n
-        if (linea[0] == ';' || linea[0] == '\0') {   // ignora comentarios y vacías
+        rtrim(linea);                                
+        if (linea[0] == ';' || linea[0] == '\0') {   
             continue;
         }
         
-        //token es un puntero para tokenizar
-        /*
-            Tokenización (strtok):
-
-            Se separa en inst (instrucción), var (registro), val (valor).
-
-            Se reconstruye el IR concatenando la instrucción y sus operandos.
-        */
         token = strtok(linea, delimitador);
         if (!token) continue;
         strncpy(copia, token, sizeof(copia)); copia[sizeof(copia)-1] = '\0';
@@ -139,7 +117,6 @@ int ejecutar_archivo(const char *ruta) {
                     strcat(IR, token);
                     break;
                 case 1:
-                    // === CAMBIO IMPORTANTE ===  var ahora es [3] para "Ax"/"Bx"/etc + '\0'
                     strncpy(var, token, sizeof(var)); var[sizeof(var)-1] = '\0';
                     strcat(IR, " ");
                     strcat(IR, token);
@@ -154,12 +131,17 @@ int ejecutar_archivo(const char *ruta) {
             i++;
         }
 
-        
-        /*
-            comparaciones de las variables instruccion en el incremento y decremento que ejecuta el status de operando incorrecto
-            en mi caso seria lo de la validacion del status que me arroja error:operando incorrecto
-        */
-       
+        // === Validar END ===
+        if (strcmp(inst, "END") == 0) {
+            strcpy(status, "Correcto");
+            mvprintw(fila, 0, "%-5d%-10d%-10d%-10d%-10d%-10d%-23s%s",
+                     id, Ax, Bx, Cx, Dx, Pc, IR, status);
+            fila++;
+            refresh();
+            break; // termina ejecución aquí
+        }
+
+        // Validación de operandos
         if ((strcmp(inst,"INC")==0 || strcmp(inst,"DEC")==0)) {
             if (i != 2) strcpy(status,"operando incorrecto");
         } else {
@@ -170,7 +152,6 @@ int ejecutar_archivo(const char *ruta) {
             strcpy(status,"Registro invalido");
         }
 
-        /*comparacion con la variable valor para verificar el status cuando se le asigna un numero o letra*/ 
         int valor = 0;
         if (strcmp(status,"Correcto")==0 && (i==3)) {
             if (!Numero(val)) {
@@ -179,16 +160,8 @@ int ejecutar_archivo(const char *ruta) {
                 valor = atoi(val);
             }
         }
-        /*
-            Ejecución de la instrucción:
 
-            Se compara inst con cadenas (MOV, ADD, SUB, MUL, DIV, INC, DEC).
-
-            Dependiendo del registro (Ax, Bx, Cx, Dx), se ejecuta la operación con las funciones de operaciones.h.
-
-            Si la instrucción o registro es inválido → status = "Instruccion invalida" o "Registro inválido".
-        */
-        //int valor = (i >= 3) ? atoi(val) : 0;
+        // === Ejecución de instrucciones ===
         if(strcmp(status,"Correcto")==0) {
             if (strcmp(inst, "MOV") == 0) {
                 if      (strcmp(var,"Ax")==0) Ax = mov(Ax, valor);
@@ -211,7 +184,6 @@ int ejecutar_archivo(const char *ruta) {
                 else if (strcmp(var,"Dx")==0) Dx = sub(Dx, valor);
                 else strcpy(status,"Registro inválido");
             }
-        
             else if (strcmp(inst, "MUL") == 0) {
                 if      (strcmp(var,"Ax")==0) Ax = mul(Ax, valor);
                 else if (strcmp(var,"Bx")==0) Bx = mul(Bx, valor);
@@ -220,7 +192,6 @@ int ejecutar_archivo(const char *ruta) {
                 else strcpy(status,"Registro inválido");
             }
             else if (strcmp(inst, "DIV") == 0) {
-                //manejo seguro de división entre 0
                 if (valor == 0) {
                     strcpy(status,"División por cero");
                 } else {
@@ -246,28 +217,22 @@ int ejecutar_archivo(const char *ruta) {
                 else strcpy(status,"Registro inválido");
             }
             else {
-                //printf("Comando no reconocido: %s\n", inst);
                 strcpy(status,"Instruccion invalida");
             }
         }
-        Pc++; //actualiza el contador de programa
-        //muestra el resultado de la tabla en pantalla.
-        //printf("  %d           %d            %d            %d            %d        %s        %s                           %s\n",Ax, Bx, Cx, Dx, Pc, IR, status,ruta);
 
-        mvprintw(fila, 0, "%-10d%-10d%-10d%-10d%-10d%-23s%s", Ax, Bx, Cx, Dx, Pc, IR, status);//BHimprime los registros en la fila correspondiente
-        fila++; //Prepara la siguiente línea
-        refresh();//Actualiza la pantalla para mostrar los cambios
-        
-        usleep(500000);//Pausa de 500,000 microsegundos (medio segundo)
-        
-
+        Pc++; 
+        mvprintw(fila, 0, "%-5d%-10d%-10d%-10d%-10d%-10d%-23s%s",
+                 id, Ax, Bx, Cx, Dx, Pc, IR, status);
+        fila++; 
+        id++; 
+        refresh();
+        usleep(500000);
     }
-    mvprintw(fila + 1, 0, "Ejecucion finalizada. Presiona una tecla para salir.");//Informa al usuario que la ejecución ha finalizado
-    getch(); //Espera a que el usuario presione una tecla antes de cerrar
 
-    endwin();//Cierra la pantalla de ncurses
-    
-    //cierra el archivo.
+    mvprintw(fila + 1, 0, "Ejecucion finalizada. Presiona una tecla para salir.");
+    getch();
+    endwin();
     fclose(archivo);
     return 0;
 }
