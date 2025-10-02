@@ -47,6 +47,3 @@ int dec(int a){
 
 #endif
 
-
-
-

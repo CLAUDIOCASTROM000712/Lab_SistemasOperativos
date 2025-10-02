@@ -6,6 +6,13 @@
 #include "operaciones.h" //incluyo la libreria de ecabezado de operaciones
 #include<ncurses.h>//incluí la librería ncurses
 #include<unistd.h>//para usleep
+#include "pcb.h"
+
+// Asegúrate de que la definición de PCB esté disponible.
+// Si pcb.h no define PCB, agrega aquí la definición:
+// typedef struct PCB {
+//     // campos de PCB
+// } PCB;
 
 
 /*** Prototipo de la funcion === */
@@ -13,6 +20,9 @@ static void rtrim(char *s); //elimina saltos de linea al final de cada string le
 static int RegistroValido(const char *var);//verifica si el registro es valido
 static int Numero(const char *s);//verifica si el string es un numero
 int ejecutar_archivo(const char *ruta);//funcion que ejecuta un archivo asm
+
+
+
 
 /* 
    Utilidad para limpiar salto de línea al final de cada string leído.
@@ -91,8 +101,8 @@ int ejecutar_archivo(const char *ruta) {
     curs_set(0);
 
     // encabezado
-    mvprintw(0, 0, "ID   Ax        Bx        Cx        Dx        Pc        IR                  Status");
-    mvprintw(1, 0, "======================================================================================");
+    mvprintw(0, 0, "ID   Ax        Bx        Cx        Dx        Pc        IR                  proceso        Status");
+    mvprintw(1, 0, "==================================================================================================");
 
     int fila = 2; 
     int id = 1; // contador autoincremental
@@ -134,8 +144,8 @@ int ejecutar_archivo(const char *ruta) {
         // === Validar END ===
         if (strcmp(inst, "END") == 0) {
             strcpy(status, "Correcto");
-            mvprintw(fila, 0, "%-5d%-10d%-10d%-10d%-10d%-10d%-23s%s",
-                     id, Ax, Bx, Cx, Dx, Pc, IR, status);
+            mvprintw(fila, 0, "%-5d%-10d%-10d%-10d%-10d%-10d%-20s%-10s      %s",
+                     id, Ax, Bx, Cx, Dx, Pc, IR, ruta,status);
             fila++;
             refresh();
             break; // termina ejecución aquí
@@ -222,8 +232,8 @@ int ejecutar_archivo(const char *ruta) {
         }
 
         Pc++; 
-        mvprintw(fila, 0, "%-5d%-10d%-10d%-10d%-10d%-10d%-23s%s",
-                 id, Ax, Bx, Cx, Dx, Pc, IR, status);
+        mvprintw(fila, 0, "%-5d%-10d%-10d%-10d%-10d%-10d%-20s%-10s     %s ",
+                 id, Ax, Bx, Cx, Dx, Pc, IR, ruta,status);
         fila++; 
         id++; 
         refresh();
@@ -239,3 +249,4 @@ int ejecutar_archivo(const char *ruta) {
 
    
 #endif    
+
