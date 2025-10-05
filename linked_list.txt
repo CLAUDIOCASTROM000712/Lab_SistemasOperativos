@@ -1,0 +1,44 @@
+//declarar prototipos de las funciones de listas con mi estructura pcb.
+void insertar_inicio(PCB **cabeza, PCB *nuevo);
+void insertar_final(PCB **cabeza, PCB *nuevo);
+PCB *sacar_primero(PCB **cabeza);
+PCB *sacar_ultimo(PCB **cabeza);
+void mostrar_lista(const char *titulo, PCB *cabeza);
+
+//defino mis funciones de listas
+void insertar_inicio(PCB **cabeza, PCB *nuevo){
+    nuevo->siguiente = *cabeza;
+    *cabeza = nuevo;
+}
+void insertar_final(PCB **cabeza, PCB *nuevo){
+    PCB *temp = *cabeza;
+    while(temp->siguiente != NULL){
+        temp = temp->siguiente;
+    }
+    temp->siguiente = nuevo;
+    nuevo->siguiente = NULL;
+}
+PCB *sacar_primero(PCB **cabeza){
+    PCB *temp = *cabeza;
+    *cabeza = temp->siguiente;
+    return temp;
+}
+PCB *sacar_ultimo(PCB **cabeza){
+        PCB *temp = *cabeza;
+        while(temp->siguiente != NULL){
+            temp = temp->siguiente;
+        }
+        return temp;
+}
+void mostrar_lista(const char *titulo, PCB *cabeza){
+    printf("\n$ %s:\n", titulo);
+    printf("id\tPC\tAx\tBx\tCx\tDx\tProceso\t\tstatus\t\tIR\n");
+    PCB *temp = cabeza;
+    while(temp != NULL){
+        printf("%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\n",
+               temp->id, temp->Pc, temp->Ax, temp->Bx, temp->Cx, temp->Dx,
+               temp->nombre, temp->status, temp->IR);
+        temp = temp->siguiente;
+    } 
+    return;
+}
