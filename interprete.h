@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ncurses.h>
-#include <unistd.h> // usleep
+#include <unistd.h>
 #include "operaciones.h"
 #include "pcb.h"
 
@@ -13,6 +13,14 @@
 static void rtrim(char *s) {
     size_t n = strlen(s);
     while (n && (s[n-1] == '\n' || s[n-1] == '\r')) s[--n] = '\0';
+}
+
+static void trim(char *s) {
+    char *p = s;
+    while (*p == ' ' || *p == '\t') p++;
+    if (p != s) memmove(s, p, strlen(p)+1);
+    size_t n = strlen(s);
+    while (n && (s[n-1] == ' ' || s[n-1] == '\t')) s[--n] = '\0';
 }
 
 static int RegistroValido(const char *var) {
@@ -55,7 +63,7 @@ static PCB* pop_listo(void) {
 static void anexar_terminado_final(PCB *src) {
     PCB *n = (PCB*)malloc(sizeof(PCB));
     if (!n) return;
-    *n = *src; // copia completa
+    *n = *src;
     n->file = NULL;
     n->siguiente = NULL;
 
@@ -83,7 +91,6 @@ static void dibujar_encabezados() {
     mvprintw(15, 0, "==================================================================================================");
 }
 
-/* Mostrar lista de listos */
 static void dibujar_listos(int fila_base) {
     int fila = fila_base;
     PCB *q = lista_listos;
@@ -96,7 +103,6 @@ static void dibujar_listos(int fila_base) {
     }
 }
 
-/* Mostrar lista de terminados */
 static void dibujar_terminados(int fila_base) {
     int fila = fila_base;
     PCB *q = lista_terminados;
@@ -117,25 +123,74 @@ static int ejecutar_instruccion_linea(PCB *p, const char *linea) {
     rtrim(buf);
     if (buf[0] == ';' || buf[0] == '\0') return 0;
 
-    char inst[16] = "", var[16] = "", valstr[32] = "";
-    sscanf(buf, "%15s %15[^,],%31s", inst, var, valstr);
+    char inst[16] = "", rest[64] = "";
+    char var[32] = "", valstr[32] = "";
 
-    snprintf(p->IR, sizeof(p->IR), "%s%s%s%s",
-             inst, var[0] ? " " : "", var, valstr[0] ? "," : "");
-    if (valstr[0]) strcat(p->IR, valstr);
+    if (sscanf(buf, "%15s %63[^\n]", inst, rest) < 1) {
+        strncpy(p->status, "Formato invalido", sizeof(p->status)-1);
+        return 0;
+    }
+    trim(inst);
+    trim(rest);
+
+    if (rest[0]) {
+        char copy[64];
+        strncpy(copy, rest, sizeof(copy)-1);
+        copy[sizeof(copy)-1] = '\0';
+        char *tok = strtok(copy, ",");
+        if (tok) { strncpy(var, tok, sizeof(var)-1); var[sizeof(var)-1]='\0'; trim(var); }
+        tok = strtok(NULL, ",");
+        if (tok) { strncpy(valstr, tok, sizeof(valstr)-1); valstr[sizeof(valstr)-1]='\0'; trim(valstr); }
+        tok = strtok(NULL, ",");
+        if (tok) {
+            strncpy(p->status, "Formato invalido", sizeof(p->status)-1);
+            return 0;
+        }
+    }
+
+    char tempIR[128];
+    if (var[0] && valstr[0])
+        snprintf(tempIR, sizeof(tempIR), "%s %s,%s", inst, var, valstr);
+    else if (var[0])
+        snprintf(tempIR, sizeof(tempIR), "%s %s", inst, var);
+    else
+        snprintf(tempIR, sizeof(tempIR), "%s", inst);
+    strncpy(p->IR, tempIR, sizeof(p->IR)-1);
+    p->IR[sizeof(p->IR)-1] = '\0';
 
     if (strcmp(inst, "END") == 0) {
         strncpy(p->status, "Correcto", sizeof(p->status)-1);
         return 1;
     }
 
-    if (!RegistroValido(var)) {
+    if (var[0] && !RegistroValido(var)) {
         strncpy(p->status, "Registro invalido", sizeof(p->status)-1);
         return 0;
     }
 
+    if (strcmp(inst, "INC") == 0 || strcmp(inst, "DEC") == 0) {
+        if (valstr[0]) {
+            strncpy(p->status, "Formato invalido", sizeof(p->status)-1);
+            return 0;
+        }
+    } else if (strcmp(inst, "MOV") == 0 || strcmp(inst, "ADD") == 0 ||
+               strcmp(inst, "SUB") == 0 || strcmp(inst, "MUL") == 0 ||
+               strcmp(inst, "DIV") == 0) {
+        if (!valstr[0]) {
+            strncpy(p->status, "Falta operando", sizeof(p->status)-1);
+            return 0;
+        }
+        if (!Numero(valstr)) {
+            strncpy(p->status, "Valor invalido", sizeof(p->status)-1);
+            return 0;
+        }
+    } else {
+        strncpy(p->status, "Instruccion invalida", sizeof(p->status)-1);
+        return 0;
+    }
+
     int valor = 0;
-    if (valstr[0] && Numero(valstr)) valor = atoi(valstr);
+    if (valstr[0]) valor = atoi(valstr);
 
     strncpy(p->status, "Correcto", sizeof(p->status)-1);
 
@@ -178,8 +233,6 @@ static int ejecutar_instruccion_linea(PCB *p, const char *linea) {
         else if (strcmp(var,"Bx")==0) p->Bx = dec(p->Bx);
         else if (strcmp(var,"Cx")==0) p->Cx = dec(p->Cx);
         else if (strcmp(var,"Dx")==0) p->Dx = dec(p->Dx);
-    } else {
-        strncpy(p->status, "Instruccion invalida", sizeof(p->status)-1);
     }
 
     return 0;
@@ -187,7 +240,6 @@ static int ejecutar_instruccion_linea(PCB *p, const char *linea) {
 
 /* --- Ejecución completa --- */
 int ejecutar_archivo(const char *ruta_mult) {
-    // limpiar listas
     while (lista_listos) {
         PCB *t = lista_listos;
         lista_listos = t->siguiente;
@@ -200,7 +252,6 @@ int ejecutar_archivo(const char *ruta_mult) {
         free(t);
     }
 
-    // cargar procesos
     char tmp[512];
     strncpy(tmp, ruta_mult, sizeof(tmp)-1);
     tmp[sizeof(tmp)-1] = '\0';
@@ -219,7 +270,6 @@ int ejecutar_archivo(const char *ruta_mult) {
         tok = strtok(NULL, " ");
     }
 
-    // Interfaz ncurses
     initscr();
     noecho();
     curs_set(0);
@@ -248,12 +298,11 @@ int ejecutar_archivo(const char *ruta_mult) {
             dibujar_listos(10);
             dibujar_terminados(16);
             refresh();
-            usleep(500000);
+            usleep(700000);
 
             if (fin) break;
         }
 
-        // Añadir a terminados y actualizar pantalla
         anexar_terminado_final(pcb_ejecucion);
         dibujar_encabezados();
         dibujar_listos(10);
@@ -274,3 +323,4 @@ int ejecutar_archivo(const char *ruta_mult) {
 }
 
 #endif
+
