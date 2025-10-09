@@ -5,11 +5,14 @@
 
 /*
 Laboratorio Sistemas Operativos
-Modulo 1: Simulador de CPU con instrucciones basicas.
+Modulo 2: Simulador de CPU con multiples procesos.
 Equipo #6: Claudio Castro Murillo, Oscar Amador Aguilar Calvillo, Brandon Hernandez Vargas.
 Semestre: 2025-2026
 */
 
+/*
+en mi funcion main hace la consola interactiva y ejecuta comandos
+*/
 int main(void) {
     char cmd[512];
 
