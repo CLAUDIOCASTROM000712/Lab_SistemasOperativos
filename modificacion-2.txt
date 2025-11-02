@@ -1,0 +1,698 @@
+Implementar estas modificaciones siguientes:
+1.-realiza los cambios necesarios para que cuando se encuentre un error en alguna instruccion de algun proceso(en mi archivo asm si encuentra cualquier error de sintaxis), el estado de dicho proceso sea terminado/finalizado,
+es decir, de ejecucion lo mandaras a terminado/finalizado. En finalizado se debe mostrar los valores calculados hasta el momento de error encontrado.
+Para guardar los valores de los registros globales a los locales (del proceso) crearas una funcion que se llamara GuardarContexto. 
+ejemplo de error:
+ INC Ax,Cx,etc.
+ 
+
+2.-tu programa ahora inplementara otro comando el cual sera "kill idproceso". En la terminal se muestran los procesos en "Ejecucion" , "Listos" , "Terminados".
+Si se escribe comando "Kill 3", se buscara en "Listos" y en "Ejecucion", si encuentra el proceso con el id "3" lo mandara a "terminados", en status debe imprimir "Killed" y los valores 
+de los registros calculados hasta este momento, en caso de no encontrar el id, debera imprimir "Proceso con id: 3 no existe", con id(1,2,3,etc); 
+
+3.-Crear una variable "Q" (quantum), esta variable sera del tipo entero y contendra el numero de instrucciones a realizar por cada proceso, en este caso se deberan ejecutar cuatro (4) instrucciones por proceso
+,lo cual significa que cuando el proceso sea puesto en "Ejecucion" se ejecutan solo cuatro instrucciones, una vez ejecutado ese numero de instrucciones el proceso en cuestion regresara/encolara a "Listos". Si las instrucciones del proceso finalizan antes de que lo haga el "quantum" debera ser enviado a "Terminados". Cuando el proceso pase a "Listos" a "Ejecucion" debera crear una funcion de nombre CargarContexto que asignara los valores de los registros locales del proceso a los registros globales. cuando el proceso pase de "Ejecucion" a "Listos" debera hacer el uso de la funcion GuardarContexto(ejercicio 1)
+
+de mi siguiente estructura de proyecto:
+/LAB_SO
+ -principal.c
+ -interprete.h
+ -operaciones.h
+ -pcb.h
+ -kbhit.h
+
+donde:
+-principal.c:
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "interprete.h"
+
+/*
+Laboratorio Sistemas Operativos
+Modulo 2: Simulador de CPU con multiples procesos.
+Equipo #6: Claudio Castro Murillo, Oscar Amador Aguilar Calvillo, Brandon Hernandez Vargas.
+Semestre: 2025-2026
+*/
+
+/*
+en mi funcion main hace la consola interactiva y ejecuta comandos
+*/
+int main(void) {
+    char cmd[512];
+
+    puts("Laboratorio SO - consola");
+    puts("Comandos: ejecuta <archivo1> <archivo2> ... | salir");
+
+    for (;;) {
+        printf("$ ");
+        if (!fgets(cmd, sizeof(cmd), stdin)) break;
+        rtrim(cmd);
+
+        if (strncmp(cmd, "salir", 5) == 0) {
+            puts("Saliendo...");
+            break;
+        }
+
+        if (strncmp(cmd, "ejecuta ", 8) == 0) {
+            const char *rest = cmd + 8;
+            while (*rest == ' ') rest++;
+            if (*rest == '\0') {
+                puts("Uso: ejecuta <archivo1> <archivo2> ...");
+                continue;
+            }
+            int rc = ejecutar_archivo(rest); // ahora acepta varios archivos separados por espacios
+            if (rc != 0) {
+                printf("Fallo al ejecutar (codigo %d)\n", rc);
+            }
+            continue;
+        }
+
+        puts("Comando no reconocido. Usa: ejecuta <archivo1> <archivo2> ... | salir");
+    }
+
+    return 0;
+}
+
+-interprete.h:
+#ifndef interprete_h
+#define interprete_h
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ncurses.h>
+#include <unistd.h>
+#include "operaciones.h"
+#include "pcb.h"
+#include "kbhit.h"
+
+/* --- Funciones utilitarias --- */
+static void rtrim(char *s)
+{
+    size_t n = strlen(s);
+    while (n && (s[n - 1] == '\n' || s[n - 1] == '\r'))
+        s[--n] = '\0';
+}
+
+static void trim(char *s)
+{
+    char *p = s;
+    while (*p == ' ' || *p == '\t')
+        p++;
+    if (p != s)
+        memmove(s, p, strlen(p) + 1);
+    size_t n = strlen(s);
+    while (n && (s[n - 1] == ' ' || s[n - 1] == '\t'))
+        s[--n] = '\0';
+}
+
+static int RegistroValido(const char *var)
+{
+    return (strcmp(var, "Ax") == 0 || strcmp(var, "Bx") == 0 ||
+            strcmp(var, "Cx") == 0 || strcmp(var, "Dx") == 0);
+}
+
+static int Numero(const char *s)
+{
+    if (s == NULL)
+        return 0;
+    int i = 0;
+    if (s[0] == '-' && s[1] != '\0')
+        i = 1;
+    for (; s[i]; i++)
+        if (s[i] < '0' || s[i] > '9')
+            return 0;
+    return 1;
+}
+
+/* --- Listas globales --- */
+static PCB *lista_listos = NULL;
+static PCB *lista_terminados = NULL;
+static PCB *pcb_ejecucion = NULL;
+
+/* --- Funciones auxiliares para listas --- */
+static void push_listo(PCB *p)
+{
+    p->siguiente = NULL;
+    if (!lista_listos)
+        lista_listos = p;
+    else
+    {
+        PCB *q = lista_listos;
+        while (q->siguiente)
+            q = q->siguiente;
+        q->siguiente = p;
+    }
+}
+
+static PCB *pop_listo(void)
+{
+    if (!lista_listos)
+        return NULL;
+    PCB *h = lista_listos;
+    lista_listos = h->siguiente;
+    h->siguiente = NULL;
+    return h;
+}
+
+static void anexar_terminado_final(PCB *src)
+{
+    PCB *n = (PCB *)malloc(sizeof(PCB));
+    if (!n)
+        return;
+    *n = *src;
+    n->file = NULL;
+    n->siguiente = NULL;
+
+    if (!lista_terminados)
+        lista_terminados = n;
+    else
+    {
+        PCB *q = lista_terminados;
+        while (q->siguiente)
+            q = q->siguiente;
+        q->siguiente = n;
+    }
+}
+
+/* --- Interfaz ncurses --- */
+static void dibujar_encabezados()
+{
+    clear();
+    mvprintw(0, 0, "Ejecucion:");
+    mvprintw(2, 0, "ID   Ax        Bx        Cx        Dx        Pc        IR                  nombre         Status");
+    mvprintw(3, 0, "==================================================================================================");
+
+    mvprintw(6, 0, "Listos/Preparados:");
+    mvprintw(8, 0, "ID   Ax        Bx        Cx        Dx        Pc        IR                  nombre         Status");
+    mvprintw(9, 0, "--------------------------------------------------------------------------------------------------");
+
+    mvprintw(12, 0, "Terminados:");
+    mvprintw(14, 0, "ID   Ax        Bx        Cx        Dx        Pc        IR                  nombre         Status");
+    mvprintw(15, 0, "==================================================================================================");
+
+    mvprintw(LINES-1, 0, "Presiona 'q' o ESC para detener la simulacion.");
+}
+
+static void dibujar_listos(int fila_base)
+{
+    int fila = fila_base;
+    PCB *q = lista_listos;
+    while (q)
+    {
+        mvprintw(fila, 0, "%-5d%-10d%-10d%-10d%-10d%-10d%-20s%-12s%s",
+                 q->id, q->Ax, q->Bx, q->Cx, q->Dx, q->Pc,
+                 "------", q->nombre, "------");
+        fila++;
+        q = q->siguiente;
+    }
+}
+
+static void dibujar_terminados(int fila_base)
+{
+    int fila = fila_base;
+    PCB *q = lista_terminados;
+    while (q)
+    {
+        mvprintw(fila, 0, "%-5d%-10d%-10d%-10d%-10d%-10d%-20s%-12s%s",
+                 q->id, q->Ax, q->Bx, q->Cx, q->Dx, q->Pc,
+                 q->IR, q->nombre, q->status);
+        fila++;
+        q = q->siguiente;
+    }
+}
+
+/* --- Ejecución de instrucciones --- */
+static int ejecutar_instruccion_linea(PCB *p, const char *linea)
+{
+    char buf[128];
+    strncpy(buf, linea, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    rtrim(buf);
+    if (buf[0] == ';' || buf[0] == '\0')
+        return 0;
+
+    char inst[16] = "", rest[64] = "";
+    char var[32] = "", valstr[32] = "";
+
+    if (sscanf(buf, "%15s %63[^\n]", inst, rest) < 1)
+    {
+        strncpy(p->status, "Formato invalido", sizeof(p->status) - 1);
+        return 0;
+    }
+    trim(inst);
+    trim(rest);
+
+    if (rest[0])
+    {
+        char copy[64];
+        strncpy(copy, rest, sizeof(copy) - 1);
+        copy[sizeof(copy) - 1] = '\0';
+        char *tok = strtok(copy, ",");
+        if (tok)
+        {
+            strncpy(var, tok, sizeof(var) - 1);
+            var[sizeof(var) - 1] = '\0';
+            trim(var);
+        }
+        tok = strtok(NULL, ",");
+        if (tok)
+        {
+            strncpy(valstr, tok, sizeof(valstr) - 1);
+            valstr[sizeof(valstr) - 1] = '\0';
+            trim(valstr);
+        }
+        tok = strtok(NULL, ",");
+        if (tok)
+        {
+            strncpy(p->status, "Formato invalido", sizeof(p->status) - 1);
+            return 0;
+        }
+    }
+
+    char tempIR[128];
+    if (var[0] && valstr[0])
+        snprintf(tempIR, sizeof(tempIR), "%s %s,%s", inst, var, valstr);
+    else if (var[0])
+        snprintf(tempIR, sizeof(tempIR), "%s %s", inst, var);
+    else
+        snprintf(tempIR, sizeof(tempIR), "%s", inst);
+    strncpy(p->IR, tempIR, sizeof(p->IR) - 1);
+    p->IR[sizeof(p->IR) - 1] = '\0';
+
+    if (strcmp(inst, "END") == 0)
+    {
+        strncpy(p->status, "Correcto", sizeof(p->status) - 1);
+        return 1;
+    }
+
+    if (var[0] && !RegistroValido(var))
+    {
+        strncpy(p->status, "Registro invalido", sizeof(p->status) - 1);
+        return 0;
+    }
+
+    if (strcmp(inst, "INC") == 0 || strcmp(inst, "DEC") == 0)
+    {
+        if (valstr[0])
+        {
+            strncpy(p->status, "Formato invalido", sizeof(p->status) - 1);
+            return 0;
+        }
+    }
+    else if (strcmp(inst, "MOV") == 0 || strcmp(inst, "ADD") == 0 ||
+             strcmp(inst, "SUB") == 0 || strcmp(inst, "MUL") == 0 ||
+             strcmp(inst, "DIV") == 0)
+    {
+        if (!valstr[0])
+        {
+            strncpy(p->status, "Falta operando", sizeof(p->status) - 1);
+            return 0;
+        }
+        if (!Numero(valstr))
+        {
+            strncpy(p->status, "Valor invalido", sizeof(p->status) - 1);
+            return 0;
+        }
+    }
+    else
+    {
+        strncpy(p->status, "Instruccion invalida", sizeof(p->status) - 1);
+        return 0;
+    }
+
+    int valor = 0;
+    if (valstr[0])
+        valor = atoi(valstr);
+
+    strncpy(p->status, "Correcto", sizeof(p->status) - 1);
+
+    if (strcmp(inst, "MOV") == 0)
+    {
+        if (strcmp(var, "Ax") == 0)
+            p->Ax = mov(p->Ax, valor);
+        else if (strcmp(var, "Bx") == 0)
+            p->Bx = mov(p->Bx, valor);
+        else if (strcmp(var, "Cx") == 0)
+            p->Cx = mov(p->Cx, valor);
+        else if (strcmp(var, "Dx") == 0)
+            p->Dx = mov(p->Dx, valor);
+    }
+    else if (strcmp(inst, "ADD") == 0)
+    {
+        if (strcmp(var, "Ax") == 0)
+            p->Ax = add(p->Ax, valor);
+        else if (strcmp(var, "Bx") == 0)
+            p->Bx = add(p->Bx, valor);
+        else if (strcmp(var, "Cx") == 0)
+            p->Cx = add(p->Cx, valor);
+        else if (strcmp(var, "Dx") == 0)
+            p->Dx = add(p->Dx, valor);
+    }
+    else if (strcmp(inst, "SUB") == 0)
+    {
+        if (strcmp(var, "Ax") == 0)
+            p->Ax = sub(p->Ax, valor);
+        else if (strcmp(var, "Bx") == 0)
+            p->Bx = sub(p->Bx, valor);
+        else if (strcmp(var, "Cx") == 0)
+            p->Cx = sub(p->Cx, valor);
+        else if (strcmp(var, "Dx") == 0)
+            p->Dx = sub(p->Dx, valor);
+    }
+    else if (strcmp(inst, "MUL") == 0)
+    {
+        if (strcmp(var, "Ax") == 0)
+            p->Ax = mul(p->Ax, valor);
+        else if (strcmp(var, "Bx") == 0)
+            p->Bx = mul(p->Bx, valor);
+        else if (strcmp(var, "Cx") == 0)
+            p->Cx = mul(p->Cx, valor);
+        else if (strcmp(var, "Dx") == 0)
+            p->Dx = mul(p->Dx, valor);
+    }
+    else if (strcmp(inst, "DIV") == 0)
+    {
+        if (valor == 0)
+        {
+            strncpy(p->status, "Div por cero", sizeof(p->status) - 1);
+            return 0;
+        }
+        if (strcmp(var, "Ax") == 0)
+            p->Ax = divi(p->Ax, valor);
+        else if (strcmp(var, "Bx") == 0)
+            p->Bx = divi(p->Bx, valor);
+        else if (strcmp(var, "Cx") == 0)
+            p->Cx = divi(p->Cx, valor);
+        else if (strcmp(var, "Dx") == 0)
+            p->Dx = divi(p->Dx, valor);
+    }
+    else if (strcmp(inst, "INC") == 0)
+    {
+        if (strcmp(var, "Ax") == 0)
+            p->Ax = inc(p->Ax);
+        else if (strcmp(var, "Bx") == 0)
+            p->Bx = inc(p->Bx);
+        else if (strcmp(var, "Cx") == 0)
+            p->Cx = inc(p->Cx);
+        else if (strcmp(var, "Dx") == 0)
+            p->Dx = inc(p->Dx);
+    }
+    else if (strcmp(inst, "DEC") == 0)
+    {
+        if (strcmp(var, "Ax") == 0)
+            p->Ax = dec(p->Ax);
+        else if (strcmp(var, "Bx") == 0)
+            p->Bx = dec(p->Bx);
+        else if (strcmp(var, "Cx") == 0)
+            p->Cx = dec(p->Cx);
+        else if (strcmp(var, "Dx") == 0)
+            p->Dx = dec(p->Dx);
+    }
+
+    return 0;
+}
+
+/* --- Ejecución completa --- */
+int ejecutar_archivo(const char *ruta_mult)
+{
+    while (lista_listos)
+    {
+        PCB *t = lista_listos;
+        lista_listos = t->siguiente;
+        if (t->file)
+            fclose(t->file);
+        free(t);
+    }
+    while (lista_terminados)
+    {
+        PCB *t = lista_terminados;
+        lista_terminados = t->siguiente;
+        free(t);
+    }
+
+    char tmp[512];
+    strncpy(tmp, ruta_mult, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    char *tok = strtok(tmp, " ");
+    int proc_id = 1;
+
+    while (tok)
+    {
+        FILE *f = fopen(tok, "r");
+        if (!f)
+        {
+            printf("No se pudo abrir: %s\n", tok);
+            return 1;
+        }
+        PCB *p = (PCB *)malloc(sizeof(PCB));
+        crear_PCB(p, proc_id++, tok, f);
+        push_listo(p);
+        tok = strtok(NULL, " ");
+    }
+
+    initscr();
+    noecho();
+    curs_set(0);
+
+    dibujar_encabezados();
+    dibujar_listos(10);
+    refresh();
+
+    while ((pcb_ejecucion = pop_listo()) != NULL)
+    {
+        rewind(pcb_ejecucion->file);
+        strncpy(pcb_ejecucion->status, "ejecucion", sizeof(pcb_ejecucion->status) - 1);
+
+        char linea[128];
+        while (fgets(linea, sizeof(linea), pcb_ejecucion->file))
+        {
+            rtrim(linea);
+            if (linea[0] == ';' || linea[0] == '\0')
+                continue;
+            int fin = ejecutar_instruccion_linea(pcb_ejecucion, linea);
+            pcb_ejecucion->Pc++;
+
+            // agrego lo de kbhit
+            //  ---Verificar interrupción por teclado ---
+            if (kbhit())
+            {
+                int ch = getchar(); // leer tecla presionada
+                if (ch == 'q' || ch == 'Q' || ch == 27)
+                { // 'q' o 'ESC'
+                    mvprintw(LINES - 3, 0, "Interrupcion detectada por teclado. Cancelando ejecucion...");
+                    refresh();
+                    usleep(800000);
+
+                    // Cerrar ncurses
+                    endwin();
+
+                    // Liberar memoria pendiente
+                    while (lista_listos)
+                    {
+                        PCB *t = lista_listos;
+                        lista_listos = t->siguiente;
+                        if (t->file)
+                            fclose(t->file);
+                        free(t);
+                    }
+                    while (lista_terminados)
+                    {
+                        PCB *t = lista_terminados;
+                        lista_terminados = t->siguiente;
+                        if (t->file)
+                            fclose(t->file);
+                        free(t);
+                    }
+                    if (pcb_ejecucion)
+                    {
+                        if (pcb_ejecucion->file)
+                            fclose(pcb_ejecucion->file);
+                        free(pcb_ejecucion);
+                        pcb_ejecucion = NULL;
+                    }
+
+                    printf("\n\n[Ejecucion interrumpida por el usuario]\n");
+                    return 0;
+                }else if (ch == 'p' || ch == 'P') { // Pausar
+                    mvprintw(LINES-3, 0, "Ejecucion pausada. Presiona 'r' para reanudar o 'q' para salir.");
+                    refresh();
+                    int ch2;
+                    do {
+                        usleep(100000);
+                        if (kbhit()) {
+                            ch2 = getchar();
+                            if (ch2 == 'r' || ch2 == 'R') {
+                                mvprintw(LINES-3, 0, "Ejecucion reanudada.                                          ");
+                                refresh();
+                                break;
+                            }
+                            if (ch2 == 'q' || ch2 == 'Q' || ch2 == 27) {
+                                endwin();
+                                printf("\n\n[Ejecucion interrumpida durante pausa]\n");
+                            return 0;
+                            }
+                        }
+                    } while (1);
+                }
+            }
+
+            dibujar_encabezados();
+            mvprintw(4, 0, "%-5d%-10d%-10d%-10d%-10d%-10d%-20s%-12s%s",
+                     pcb_ejecucion->id, pcb_ejecucion->Ax, pcb_ejecucion->Bx,
+                     pcb_ejecucion->Cx, pcb_ejecucion->Dx, pcb_ejecucion->Pc,
+                     pcb_ejecucion->IR, pcb_ejecucion->nombre, pcb_ejecucion->status);
+
+            dibujar_listos(10);
+            dibujar_terminados(16);
+            refresh();
+            usleep(700000);
+
+            if (fin)
+                break;
+        }
+
+        anexar_terminado_final(pcb_ejecucion);
+        dibujar_encabezados();
+        dibujar_listos(10);
+        dibujar_terminados(16);
+        refresh();
+        usleep(500000);
+
+        if (pcb_ejecucion->file)
+            fclose(pcb_ejecucion->file);
+        free(pcb_ejecucion);
+        pcb_ejecucion = NULL;
+    }
+
+    mvprintw(LINES - 2, 0, "Ejecucion finalizada. Presiona una tecla para salir...");
+    refresh();
+    getch();
+    endwin();
+    return 0;
+}
+
+#endif
+
+-operaciones.h:
+#ifndef OPERACIONES_H //guarda de inclusiones (ifndef, define, endif)
+#define OPERACIONES_H //guarda de inclusiones
+int mov(int a, int b); //prototipos de las funciones
+int add(int a, int b); //prototipos de las funciones
+int sub(int a, int b); //prototipos de las funciones
+int mul(int a, int b); 
+int divi(int a, int b);
+int inc(int a);
+int dec(int a);
+
+//funciones de operaciones
+//funcion de asignacion
+int mov(int a, int b){
+    return a=b;
+}
+
+//funcon de suma
+int add(int a, int b){
+    return a+b; //devuelve la suma de a y b
+}
+
+//funcion de resta
+int sub(int a, int b){
+    return a-b; //devuelve la resta de a y b
+}
+
+//funcion de multiplicacion
+int mul(int a, int b){
+    return a*b; //devuelve el producto de a y b
+}
+
+//funcion de division
+int divi(int a, int b){
+    return a/b; //devuelve el resultado de la division de a entre b
+}
+
+//funcion de incremento y decremento
+int inc(int a){
+    a++;    //incrementa en una unidad el valor de a
+    return a;
+}
+
+int dec(int a){
+    a--;    //decrementa en una unidad el valor de a
+    return a;
+}
+
+#endif
+
+-pcb.h:
+#ifndef PCB_H
+#define PCB_H
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct PCB {
+    int id; // identificador de proceso (no de instruccion)
+    int Pc; // program counter (1-based)
+    int Ax, Bx, Cx, Dx; // registros
+    char IR[64]; // instrucción actual (texto)
+    char status[32]; // estado: "listo", "ejecucion", "terminado", "error"
+    char nombre[64]; // nombre del archivo .asm
+    FILE *file; // apuntador al archivo abierto
+    struct PCB *siguiente; // puntero al siguiente (lista ligada)
+} PCB;
+
+/* helper para inicializar PCB (opcional) */
+static void crear_PCB(PCB *p, int id, const char *nombre, FILE *file) {
+    p->id = id;
+    p->Pc = 1;
+    p->Ax = p->Bx = p->Cx = p->Dx = 0;
+    p->IR[0] = '\0';
+    strncpy(p->status, "listo", sizeof(p->status)-1);
+    p->status[sizeof(p->status)-1] = '\0';
+    strncpy(p->nombre, nombre, sizeof(p->nombre)-1);
+    p->nombre[sizeof(p->nombre)-1] = '\0';
+    p->file = file;
+    p->siguiente = NULL;
+}
+#endif
+
+-kbhit.h:
+#ifndef KBHIT_H
+#define KBHIT_H
+
+#include <stdio.h>
+#include <termios.h>
+#include <unistd.h>
+#include <sys/time.h>
+#include <sys/select.h>
+#include <stddef.h>
+
+static inline int kbhit(void)
+{
+    struct timeval tv;
+    fd_set read_fd;
+
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+
+    FD_ZERO(&read_fd);
+    FD_SET(STDIN_FILENO, &read_fd);
+
+    if (select(STDIN_FILENO + 1, &read_fd, NULL, NULL, &tv) == -1)
+        return 0;
+
+    return FD_ISSET(STDIN_FILENO, &read_fd);
+}
+
+
+
+
+#endif
+
+
+ 
+ 
+ 
+ 

@@ -1,5 +1,5 @@
-#ifndef INTERPRETE_H
-#define INTERPRETE_H
+#ifndef interprete_h
+#define interprete_h
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,11 +54,6 @@ static PCB *lista_listos = NULL;
 static PCB *lista_terminados = NULL;
 static PCB *pcb_ejecucion = NULL;
 
-/* --- Registros globales (para simulacion de cargar/guardar contexto) --- */
-static int gAx = 0, gBx = 0, gCx = 0, gDx = 0;
-/* Quantum por defecto (puedes cambiarlo) */
-static int Q = 4;
-
 /* --- Funciones auxiliares para listas --- */
 static void push_listo(PCB *p)
 {
@@ -90,7 +85,7 @@ static void anexar_terminado_final(PCB *src)
     if (!n)
         return;
     *n = *src;
-    n->file = NULL; // no guardamos el FILE en la lista de terminados
+    n->file = NULL;
     n->siguiente = NULL;
 
     if (!lista_terminados)
@@ -104,26 +99,23 @@ static void anexar_terminado_final(PCB *src)
     }
 }
 
-/* --- Guardar/Cargar contexto --- */
-// Guarda los registros globales en el PCB (cuando pasa Ejecucion -> Listos/Terminados)
-static void GuardarContexto(PCB *p)
+// funcion de guardar contexto
+static void GuardarContexto(PCB *p, int Ax, int Bx, int Cx, int Dx)
 {
-    if (!p) return;
-    p->Ax = gAx;
-    p->Bx = gBx;
-    p->Cx = gCx;
-    p->Dx = gDx;
+    p->Ax = Ax;
+    p->Bx = Bx;
+    p->Cx = Cx;
+    p->Dx = Dx;
 }
 
-// Carga los registros del PCB a los registros globales (cuando pasa Listos -> Ejecucion)
-static void CargarContexto(PCB *p)
-{
-    if (!p) return;
-    gAx = p->Ax;
-    gBx = p->Bx;
-    gCx = p->Cx;
-    gDx = p->Dx;
-}
+// Función para cargar el contexto de un proceso a los registros globales
+/*
+static void CargarContexto(PCB *p, int *Ax, int *Bx, int *Cx, int *Dx){
+    *Ax = p->Ax;
+    *Bx = p->Bx;
+    *Cx = p->Cx;
+    *Dx = p->Dx;
+}*/
 
 /* --- Función Kill --- */
 static int kill_proceso(int id) {
@@ -140,11 +132,10 @@ static int kill_proceso(int id) {
                 lista_listos = curr->siguiente;
 
             strncpy(curr->status, "Killed", sizeof(curr->status) - 1);
-            GuardarContexto(curr);
+            GuardarContexto(curr, curr->Ax, curr->Bx, curr->Cx, curr->Dx);
             anexar_terminado_final(curr);
 
             printf("Proceso con ID %d finalizado (Killed)\n", id);
-            if (curr->file) fclose(curr->file);
             free(curr);
             return 1;
         }
@@ -155,7 +146,8 @@ static int kill_proceso(int id) {
     // Buscar en ejecución
     if (pcb_ejecucion && pcb_ejecucion->id == id) {
         strncpy(pcb_ejecucion->status, "Killed", sizeof(pcb_ejecucion->status) - 1);
-        GuardarContexto(pcb_ejecucion);
+        GuardarContexto(pcb_ejecucion, pcb_ejecucion->Ax, pcb_ejecucion->Bx,
+                        pcb_ejecucion->Cx, pcb_ejecucion->Dx);
         anexar_terminado_final(pcb_ejecucion);
 
         printf("Proceso con ID %d finalizado (Killed)\n", id);
@@ -235,7 +227,7 @@ static int ejecutar_instruccion_linea(PCB *p, const char *linea)
     if (sscanf(buf, "%15s %63[^\n]", inst, rest) < 1)
     {
         strncpy(p->status, "Error", sizeof(p->status) - 1);
-        GuardarContexto(p);
+        GuardarContexto(p, p->Ax, p->Bx, p->Cx, p->Dx);
         return -1;
     }
     trim(inst);
@@ -264,7 +256,7 @@ static int ejecutar_instruccion_linea(PCB *p, const char *linea)
         if (tok)
         {
             strncpy(p->status, "Error", sizeof(p->status) - 1);
-            GuardarContexto(p);
+            GuardarContexto(p, p->Ax, p->Bx, p->Cx, p->Dx);
             return -1;
         }
     }
@@ -288,7 +280,7 @@ static int ejecutar_instruccion_linea(PCB *p, const char *linea)
     if (var[0] && !RegistroValido(var))
     {
         strncpy(p->status, "Error", sizeof(p->status) - 1);
-        GuardarContexto(p);
+        GuardarContexto(p, p->Ax, p->Bx, p->Cx, p->Dx);
         return -1;
     }
 
@@ -298,7 +290,7 @@ static int ejecutar_instruccion_linea(PCB *p, const char *linea)
         if (valstr[0])
         {
             strncpy(p->status, "Error", sizeof(p->status) - 1);
-            GuardarContexto(p);
+            GuardarContexto(p, p->Ax, p->Bx, p->Cx, p->Dx);
             return -1;
         }
     }
@@ -309,20 +301,20 @@ static int ejecutar_instruccion_linea(PCB *p, const char *linea)
         if (!valstr[0])
         {
             strncpy(p->status, "Error", sizeof(p->status) - 1);
-            GuardarContexto(p);
+            GuardarContexto(p, p->Ax, p->Bx, p->Cx, p->Dx);
             return -1;
         }
         if (!Numero(valstr))
         {
             strncpy(p->status, "Error", sizeof(p->status) - 1);
-            GuardarContexto(p);
+            GuardarContexto(p, p->Ax, p->Bx, p->Cx, p->Dx);
             return -1;
         }
     }
     else
     {
         strncpy(p->status, "Error", sizeof(p->status) - 1);
-        GuardarContexto(p);
+        GuardarContexto(p, p->Ax, p->Bx, p->Cx, p->Dx);
         return -1;
     }
 
@@ -332,95 +324,94 @@ static int ejecutar_instruccion_linea(PCB *p, const char *linea)
 
     strncpy(p->status, "Correcto", sizeof(p->status) - 1);
 
-    // Ahora las operaciones se realizan sobre los registros globales (gAx, gBx...)
     if (strcmp(inst, "MOV") == 0)
     {
         if (strcmp(var, "Ax") == 0)
-            gAx = mov(gAx, valor);
+            p->Ax = mov(p->Ax, valor);
         else if (strcmp(var, "Bx") == 0)
-            gBx = mov(gBx, valor);
+            p->Bx = mov(p->Bx, valor);
         else if (strcmp(var, "Cx") == 0)
-            gCx = mov(gCx, valor);
+            p->Cx = mov(p->Cx, valor);
         else if (strcmp(var, "Dx") == 0)
-            gDx = mov(gDx, valor);
+            p->Dx = mov(p->Dx, valor);
     }
     else if (strcmp(inst, "ADD") == 0)
     {
         if (strcmp(var, "Ax") == 0)
-            gAx = add(gAx, valor);
+            p->Ax = add(p->Ax, valor);
         else if (strcmp(var, "Bx") == 0)
-            gBx = add(gBx, valor);
+            p->Bx = add(p->Bx, valor);
         else if (strcmp(var, "Cx") == 0)
-            gCx = add(gCx, valor);
+            p->Cx = add(p->Cx, valor);
         else if (strcmp(var, "Dx") == 0)
-            gDx = add(gDx, valor);
+            p->Dx = add(p->Dx, valor);
     }
     else if (strcmp(inst, "SUB") == 0)
     {
         if (strcmp(var, "Ax") == 0)
-            gAx = sub(gAx, valor);
+            p->Ax = sub(p->Ax, valor);
         else if (strcmp(var, "Bx") == 0)
-            gBx = sub(gBx, valor);
+            p->Bx = sub(p->Bx, valor);
         else if (strcmp(var, "Cx") == 0)
-            gCx = sub(gCx, valor);
+            p->Cx = sub(p->Cx, valor);
         else if (strcmp(var, "Dx") == 0)
-            gDx = sub(gDx, valor);
+            p->Dx = sub(p->Dx, valor);
     }
     else if (strcmp(inst, "MUL") == 0)
     {
         if (strcmp(var, "Ax") == 0)
-            gAx = mul(gAx, valor);
+            p->Ax = mul(p->Ax, valor);
         else if (strcmp(var, "Bx") == 0)
-            gBx = mul(gBx, valor);
+            p->Bx = mul(p->Bx, valor);
         else if (strcmp(var, "Cx") == 0)
-            gCx = mul(gCx, valor);
+            p->Cx = mul(p->Cx, valor);
         else if (strcmp(var, "Dx") == 0)
-            gDx = mul(gDx, valor);
+            p->Dx = mul(p->Dx, valor);
     }
     else if (strcmp(inst, "DIV") == 0)
     {
         if (valor == 0)
         {
             strncpy(p->status, "Error", sizeof(p->status) - 1);
-            GuardarContexto(p);
+            GuardarContexto(p, p->Ax, p->Bx, p->Cx, p->Dx);
             return -1;
         }
         if (strcmp(var, "Ax") == 0)
-            gAx = divi(gAx, valor);
+            p->Ax = divi(p->Ax, valor);
         else if (strcmp(var, "Bx") == 0)
-            gBx = divi(gBx, valor);
+            p->Bx = divi(p->Bx, valor);
         else if (strcmp(var, "Cx") == 0)
-            gCx = divi(gCx, valor);
+            p->Cx = divi(p->Cx, valor);
         else if (strcmp(var, "Dx") == 0)
-            gDx = divi(gDx, valor);
+            p->Dx = divi(p->Dx, valor);
     }
     else if (strcmp(inst, "INC") == 0)
     {
         if (strcmp(var, "Ax") == 0)
-            gAx = inc(gAx);
+            p->Ax = inc(p->Ax);
         else if (strcmp(var, "Bx") == 0)
-            gBx = inc(gBx);
+            p->Bx = inc(p->Bx);
         else if (strcmp(var, "Cx") == 0)
-            gCx = inc(gCx);
+            p->Cx = inc(p->Cx);
         else if (strcmp(var, "Dx") == 0)
-            gDx = inc(gDx);
+            p->Dx = inc(p->Dx);
     }
     else if (strcmp(inst, "DEC") == 0)
     {
         if (strcmp(var, "Ax") == 0)
-            gAx = dec(gAx);
+            p->Ax = dec(p->Ax);
         else if (strcmp(var, "Bx") == 0)
-            gBx = dec(gBx);
+            p->Bx = dec(p->Bx);
         else if (strcmp(var, "Cx") == 0)
-            gCx = dec(gCx);
+            p->Cx = dec(p->Cx);
         else if (strcmp(var, "Dx") == 0)
-            gDx = dec(gDx);
+            p->Dx = dec(p->Dx);
     }
 
     return 0;
 }
 
-/* --- Ejecución completa con quantum (Q) --- */
+/* --- Ejecución completa --- */
 int ejecutar_archivo(const char *ruta_mult)
 {
     // Limpiar listas previas
@@ -467,17 +458,12 @@ int ejecutar_archivo(const char *ruta_mult)
     dibujar_listos(10);
     refresh();
 
-    // Procesar la cola de listos hasta vaciar
     while ((pcb_ejecucion = pop_listo()) != NULL)
     {
-        // Cargar contexto del PCB a los registros globales
+        rewind(pcb_ejecucion->file);
         strncpy(pcb_ejecucion->status, "ejecucion", sizeof(pcb_ejecucion->status) - 1);
-        CargarContexto(pcb_ejecucion);
 
         char linea[128];
-        int instrucciones_ejecutadas = 0;
-
-        // Leer desde la posicion actual del FILE (no hacer rewind)
         while (fgets(linea, sizeof(linea), pcb_ejecucion->file))
         {
             rtrim(linea);
@@ -486,7 +472,6 @@ int ejecutar_archivo(const char *ruta_mult)
 
             int fin = ejecutar_instruccion_linea(pcb_ejecucion, linea);
             pcb_ejecucion->Pc++;
-            instrucciones_ejecutadas++;
 
             // Interrupción por teclado (pausa o salida)
             if (kbhit())
@@ -523,11 +508,11 @@ int ejecutar_archivo(const char *ruta_mult)
                 }
             }
 
-            // Actualizar interfaz: mostrar registros globales (estado actual)
+            // Actualizar interfaz
             dibujar_encabezados();
             mvprintw(4, 0, "%-5d%-10d%-10d%-10d%-10d%-10d%-20s%-12s%s",
-                     pcb_ejecucion->id, gAx, gBx,
-                     gCx, gDx, pcb_ejecucion->Pc,
+                     pcb_ejecucion->id, pcb_ejecucion->Ax, pcb_ejecucion->Bx,
+                     pcb_ejecucion->Cx, pcb_ejecucion->Dx, pcb_ejecucion->Pc,
                      pcb_ejecucion->IR, pcb_ejecucion->nombre, pcb_ejecucion->status);
             dibujar_listos(10);
             dibujar_terminados(16);
@@ -537,57 +522,34 @@ int ejecutar_archivo(const char *ruta_mult)
             // Verificar fin o error
             if (fin == -1)
             {
-                // Error detectado → guardar contexto y mover a terminados
+                // Error detectado → mover a terminados
                 strncpy(pcb_ejecucion->status, "Error", sizeof(pcb_ejecucion->status) - 1);
-                GuardarContexto(pcb_ejecucion);
+                GuardarContexto(pcb_ejecucion, pcb_ejecucion->Ax, pcb_ejecucion->Bx,
+                                pcb_ejecucion->Cx, pcb_ejecucion->Dx);
                 anexar_terminado_final(pcb_ejecucion);
                 goto finalizar_proceso;
             }
             else if (fin == 1)
             {
                 // END → fin correcto
-                strncpy(pcb_ejecucion->status, "Correcto", sizeof(pcb_ejecucion->status) - 1);
-                GuardarContexto(pcb_ejecucion);
-                anexar_terminado_final(pcb_ejecucion);
-                goto finalizar_proceso;
-            }
-
-            // Si alcanzamos el quantum, guardamos contexto y re-encolamos
-            if (instrucciones_ejecutadas >= Q)
-            {
-                // Guardar registros en el PCB y dejar en lista de listos
-                GuardarContexto(pcb_ejecucion);
-                strncpy(pcb_ejecucion->status, "Listo", sizeof(pcb_ejecucion->status) - 1);
-                push_listo(pcb_ejecucion);
-
-                // Actualizar interfaz y continuar con el siguiente proceso
-                dibujar_encabezados();
-                dibujar_listos(10);
-                dibujar_terminados(16);
-                refresh();
-                usleep(300000);
-
-                // Dejamos pcb_ejecucion en NULL para que el while externo obtenga el siguiente
-                pcb_ejecucion = NULL;
                 break;
             }
         }
 
-        // Si pcb_ejecucion no fue re-encolado y sigue existiendo, significa que llegamos al final del archivo
-        if (pcb_ejecucion)
-        {
-finalizar_proceso:
-            dibujar_encabezados();
-            dibujar_listos(10);
-            dibujar_terminados(16);
-            refresh();
-            usleep(500000);
+        // Si llega aquí, proceso terminado correctamente
+        anexar_terminado_final(pcb_ejecucion);
 
-            if (pcb_ejecucion->file)
-                fclose(pcb_ejecucion->file);
-            free(pcb_ejecucion);
-            pcb_ejecucion = NULL;
-        }
+    finalizar_proceso:
+        dibujar_encabezados();
+        dibujar_listos(10);
+        dibujar_terminados(16);
+        refresh();
+        usleep(500000);
+
+        if (pcb_ejecucion->file)
+            fclose(pcb_ejecucion->file);
+        free(pcb_ejecucion);
+        pcb_ejecucion = NULL;
     }
 
     mvprintw(LINES - 2, 0, "Ejecucion finalizada. Presiona una tecla para salir...");
@@ -598,4 +560,6 @@ finalizar_proceso:
 }
 
 #endif
+
+
 

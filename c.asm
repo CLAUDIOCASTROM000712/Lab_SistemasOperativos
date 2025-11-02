@@ -1,7 +1,8 @@
-MOV Ax,8
-ADD Bx,6
-SUB Cx,0
-MUL Dx,5
-DIV Bx,2
-INC Cx
-DEC Dx
+MOV Ax, 20
+ADD Bx, 30
+SUB Cx, 40
+MUL Dx, 50
+DIV Ax, 60
+INC Ax
+DEC Ax
+END
