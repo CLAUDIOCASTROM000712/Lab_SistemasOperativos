@@ -1,14 +1,9 @@
-MOV Ax,10
-ADD Bx,5
-SUB Cx,100
-MUL Dx,23
-DIV Ax,5
-INC Bx
-DEC Cx 
-SUB Dx,10
-ADD Cx,5
-Ad Dx,5
-SUB Ax,a
-DIV Cx,0
-INC DX,CX
-DEC Ax,Bx
+MOV Ax, 5
+ADD Bx, 10
+SUB Cx, 3
+MUL Dx, 4
+DIV Ax, 5
+INC Ax
+DEC Bx
+END
+
