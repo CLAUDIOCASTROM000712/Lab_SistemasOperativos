@@ -4,29 +4,30 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>       // <-- necesario para srand/time
 #include <ncurses.h>
 #include <unistd.h>
-#include <panel.h>      // nueva libreria para paneles de ncurses
+#include <panel.h> //nueva libreria para paneles de ncurses
+#include <time.h>
 #include "operaciones.h"
 #include "pcb.h"
 #include "kbhit.h"
 
-/* ------------------ Ventanas y paneles (variables globales) ------------------ */
 static WINDOW *win_ejecucion = NULL;
 static WINDOW *win_listos = NULL;
 static WINDOW *win_terminados = NULL;
 static WINDOW *win_nuevos = NULL;
+static WINDOW *win_ejec = NULL;
+static WINDOW *win_term = NULL;
+// static WINDOW *win_nuevos = NULL;
+// static WINDOW *win_listos = NULL;
 
 static PANEL *panel_ejecucion = NULL;
 static PANEL *panel_listos = NULL;
 static PANEL *panel_terminados = NULL;
 static PANEL *panel_nuevos = NULL;
 
-/* Prototipos para dibujado */
 static void dibujar_nuevos(WINDOW *win_nuevos, int fila_base);
 static void dibujar_listos(WINDOW *win_listos, int fila_base);
-static void dibujar_terminados(WINDOW *win_term, int fila_base);
 
 /* --- Funciones utilitarias --- */
 static void rtrim(char *s)
@@ -67,7 +68,7 @@ static int Numero(const char *s)
     return 1;
 }
 
-/* ------------------ Listas globales ------------------ */
+/* --- Listas globales --- */
 static PCB *lista_listos = NULL;
 static PCB *lista_terminados = NULL;
 static PCB *lista_nuevos = NULL; /* nueva lista donde se ponen los procesos al leerlos */
@@ -78,57 +79,47 @@ static int gAx = 0, gBx = 0, gCx = 0, gDx = 0;
 /* Quantum por defecto (puedes cambiarlo) */
 static int Q = 4;
 
-/* ------------------ Helpers para manejo de listas ------------------ */
-
-/* libera todos los nodos de una lista simple y cierra archivos si están abiertos */
-static void liberar_lista(PCB **head)
-{
-    PCB *t;
-    while (*head)
-    {
-        t = *head;
-        *head = t->siguiente;
-        if (t->file)
-            fclose(t->file);
-        free(t);
-    }
-}
-
-/* Inserta un PCB en lista_listos respetando prioridad.
-   Prioridad 1 -> al frente; prioridad 4 -> al final.
-   Si misma prioridad -> FIFO (se encola al final del grupo con la misma prioridad). */
+/* --- Funciones auxiliares para listas --- */
 static void push_listo(PCB *p)
 {
-    if (!p)
-        return;
-    p->siguiente = NULL;
-
+    /*p->siguiente = NULL;
     if (!lista_listos)
+        lista_listos = p;
+    else
     {
+        PCB *q = lista_listos;
+        while (q->siguiente)
+            q = q->siguiente;
+        q->siguiente = p;
+    }*/
+    /*nueva contenido*/
+    p->siguiente = NULL;
+    if (!lista_listos) {
         lista_listos = p;
         return;
     }
 
     /* Si p tiene mayor prioridad (número menor) que el primero -> se pone al frente */
-    if (p->prioridad < lista_listos->prioridad)
-    {
+    if (p->prioridad < lista_listos->prioridad) {
         p->siguiente = lista_listos;
         lista_listos = p;
         return;
     }
 
-    /* Recorrer hasta encontrar la posición correcta: avanzamos mientras el siguiente
-       exista y su prioridad sea menor o igual a la prioridad de p. Así p queda
-       después de todos los de su misma prioridad (FIFO en la misma prioridad). */
+    /* Recorrer hasta encontrar la posición correcta:
+       - avanzar mientras siguiente exista y tenga prioridad <= prioridad_de_p
+       - de esta forma, si encuentras nodos con misma prioridad, avanzas hasta el final
+         del grupo, respetando FIFO dentro de la prioridad. */
     PCB *q = lista_listos;
-    while (q->siguiente && q->siguiente->prioridad <= p->prioridad)
+    while (q->siguiente && q->siguiente->prioridad <= p->prioridad) {
         q = q->siguiente;
+    }
 
+    /* Insertar después de q */
     p->siguiente = q->siguiente;
     q->siguiente = p;
 }
 
-/* Extrae el primer PCB de lista_listos (pop FIFO en la lista ordenada por prioridad) */
 static PCB *pop_listo(void)
 {
     if (!lista_listos)
@@ -141,8 +132,6 @@ static PCB *pop_listo(void)
 
 static void anexar_terminado_final(PCB *src)
 {
-    if (!src)
-        return;
     PCB *n = (PCB *)malloc(sizeof(PCB));
     if (!n)
         return;
@@ -164,8 +153,6 @@ static void anexar_terminado_final(PCB *src)
 /* --- Nueva lista `nuevos` --- */
 static void push_nuevo(PCB *p)
 {
-    if (!p)
-        return;
     p->siguiente = NULL;
     if (!lista_nuevos)
         lista_nuevos = p;
@@ -191,25 +178,44 @@ static int contar_listos(void)
     return c;
 }
 
-/* ------------------ Planificador largo plazo ------------------ */
-/* Mueve procesos desde `nuevos` hacia `listos` hasta que `listos` alcance el límite de 3 procesos. */
+/* Planificador a largo plazo: mueve procesos desde `nuevos` hacia `listos`
+   hasta que `listos` alcance el límite de 3 procesos. */
+/*
 static void planificador_largo_plazo(void)
 {
+    while (contar_listos() < 3 && lista_nuevos)
+    {
+        PCB *p = lista_nuevos;
+        lista_nuevos = p->siguiente;
+        p->siguiente = NULL;
+        strncpy(p->status, "listo", sizeof(p->status)-1);
+        p->status[sizeof(p->status)-1] = '\0';
+        push_listo(p);
+    }
+}*/
+
+static void planificador_largo_plazo(void)
+{
+    // Mover procesos desde NUEVOS → LISTOS (máximo 3 listos)
     while (contar_listos() < 3 && lista_nuevos)
     {
         PCB *p = lista_nuevos;
         lista_nuevos = p->siguiente; // avanzar en la lista NUEVOS
         p->siguiente = NULL;
 
-        /* Actualizar estado */
-        strncpy(p->status, "Listo", sizeof(p->status) - 1);
+        // Actualizar estado del proceso
+        strncpy(p->status, "listo", sizeof(p->status) - 1);
         p->status[sizeof(p->status) - 1] = '\0';
 
-        /* Encolar respetando prioridad */
+        // Encolar el proceso en la lista de listos
         push_listo(p);
     }
 
-    /* Redibujar paneles si están activos (modo ncurses) */
+    // Si ya no quedan procesos NUEVOS, aseguramos dejar la lista vacía
+    if (!lista_nuevos)
+        lista_nuevos = NULL;
+
+    // Redibujar paneles si están activos (modo ncurses)
     if (win_nuevos && win_listos)
     {
         dibujar_nuevos(win_nuevos, 2);
@@ -219,7 +225,7 @@ static void planificador_largo_plazo(void)
     }
 }
 
-/* ------------------ Guardar/Cargar contexto ------------------ */
+/* --- Guardar/Cargar contexto --- */
 // Guarda los registros globales en el PCB (cuando pasa Ejecucion -> Listos/Terminados)
 static void GuardarContexto(PCB *p)
 {
@@ -242,7 +248,7 @@ static void CargarContexto(PCB *p)
     gDx = p->Dx;
 }
 
-/* ------------------ Función Kill ------------------ */
+/* --- Función Kill --- */
 static int kill_proceso(int id)
 {
     PCB *prev = NULL;
@@ -260,21 +266,11 @@ static int kill_proceso(int id)
                 lista_listos = curr->siguiente;
 
             strncpy(curr->status, "Killed", sizeof(curr->status) - 1);
-            curr->status[sizeof(curr->status)-1] = '\0';
             GuardarContexto(curr);
             anexar_terminado_final(curr);
 
             /* Después de matar un proceso, mover nuevos a listos si hay espacio */
             planificador_largo_plazo();
-
-            /* Actualizar UI si estamos en modo ncurses */
-            if (win_listos && win_terminados)
-            {
-                dibujar_listos(win_listos, 2);
-                dibujar_terminados(win_terminados, 2);
-                update_panels();
-                doupdate();
-            }
 
             printf("Proceso con ID %d finalizado (Killed)\n", id);
             if (curr->file)
@@ -290,21 +286,11 @@ static int kill_proceso(int id)
     if (pcb_ejecucion && pcb_ejecucion->id == id)
     {
         strncpy(pcb_ejecucion->status, "Killed", sizeof(pcb_ejecucion->status) - 1);
-        pcb_ejecucion->status[sizeof(pcb_ejecucion->status)-1] = '\0';
         GuardarContexto(pcb_ejecucion);
         anexar_terminado_final(pcb_ejecucion);
 
         /* Mover nuevos a listos si hay espacio */
         planificador_largo_plazo();
-
-        /* Actualizar UI */
-        if (win_listos && win_terminados)
-        {
-            dibujar_listos(win_listos, 2);
-            dibujar_terminados(win_terminados, 2);
-            update_panels();
-            doupdate();
-        }
 
         printf("Proceso con ID %d finalizado (Killed)\n", id);
 
@@ -320,7 +306,7 @@ static int kill_proceso(int id)
     return 0;
 }
 
-/* ------------------ Interfaz ncurses con paneles ------------------ */
+/* --- Interfaz ncurses con paneles --- */
 static void inicializar_paneles()
 {
     int ancho = COLS - 2;
@@ -366,15 +352,66 @@ static void destruir_paneles()
         delwin(win_listos);
     if (win_terminados)
         delwin(win_terminados);
-
-    panel_ejecucion = panel_listos = panel_terminados = NULL;
-    win_ejecucion = win_listos = win_terminados = NULL;
 }
 
-/* ------------------ Dibujado ------------------ */
+/* --- Interfaz ncurses --- */
+static void dibujar_encabezados()
+{
+    /*
+    clear();
+    mvprintw(0, 0, "Ejecucion:");
+    mvprintw(2, 0, "ID   Ax        Bx        Cx        Dx        Pc        IR                  nombre         Status");
+    mvprintw(3, 0, "==================================================================================================");
+
+    mvprintw(6, 0, "Listos/Preparados:");
+    mvprintw(8, 0, "ID   Ax        Bx        Cx        Dx        Pc        IR                  nombre         Status");
+    mvprintw(9, 0, "--------------------------------------------------------------------------------------------------");
+
+    mvprintw(12, 0, "Terminados/Finalizados:");
+    mvprintw(14, 0, "ID   Ax        Bx        Cx        Dx        Pc        IR                  nombre         Status");
+    mvprintw(15, 0, "==================================================================================================");
+
+    mvprintw(LINES-1, 0, "Presiona 'q' o ESC para detener la simulacion.");*/
+    werase(win_ejecucion);
+    werase(win_listos);
+    werase(win_terminados);
+
+    box(win_ejecucion, 0, 0);
+    box(win_listos, 0, 0);
+    box(win_terminados, 0, 0);
+
+    mvwprintw(win_ejecucion, 0, 2, " Ejecucion ");
+    mvwprintw(win_listos, 0, 2, " Listos/Preparados ");
+    mvwprintw(win_terminados, 0, 2, " Terminados/Finalizados ");
+
+    mvwprintw(win_ejecucion, 1, 1, "ID   Ax        Bx        Cx        Dx        Pc        IR           nombre         Status");
+    mvwprintw(win_listos, 1, 1, "ID   Ax        Bx        Cx        Dx        Pc        IR              nombre         Status");
+    mvwprintw(win_terminados, 1, 1, "ID   Ax        Bx        Cx        Dx        Pc        IR          nombre         Status");
+
+    update_panels();
+    doupdate();
+}
+
+/* --- Dibujar procesos nuevos --- */
 static void dibujar_nuevos(WINDOW *win_nuevos, int fila_base)
 {
-    if (!win_nuevos) return;
+    /*werase(win_nuevos);
+    box(win_nuevos, 0, 0);
+    wattron(win_nuevos, COLOR_PAIR(5));
+    mvwprintw(win_nuevos, 0, 2, " NUEVOS ");
+    wattroff(win_nuevos, COLOR_PAIR(5));
+
+    int fila = fila_base;
+    PCB *q = lista_nuevos;
+    while (q)
+    {
+        mvwprintw(win_nuevos, fila, 1, "%-4d %-7d %-7d %-7d %-7d %-7d %-20s %-10s%s",
+                  q->id, q->Ax, q->Bx, q->Cx, q->Dx, q->Pc,
+                  "------", q->nombre, q->status);
+        fila++;
+        q = q->siguiente;
+    }
+    wrefresh(win_nuevos);*/
     werase(win_nuevos);
     box(win_nuevos, 0, 0);
     wattron(win_nuevos, COLOR_PAIR(5));
@@ -383,12 +420,11 @@ static void dibujar_nuevos(WINDOW *win_nuevos, int fila_base)
 
     int fila = fila_base;
     PCB *q = lista_nuevos;
-    //mvwprintw(win_nuevos, 1, 1, "ID  Pr  Ax  Bx  Cx  Dx  Pc  nombre");
-     mvwprintw(win_nuevos, 1, 1, "ID  Pr   Ax      Bx      Cx      Dx      Pc      IR              nombre         Status");
+    mvwprintw(win_nuevos, 1, 1, "ID  Pr  Ax  Bx  Cx  Dx  Pc  nombre");
     fila = 2;
     while (q)
     {
-        mvwprintw(win_nuevos, fila, 1, "%-3d %-3d %-7d %-7d %-7d %-7d %-7d %-18s",
+        mvwprintw(win_nuevos, fila, 1, "%-3d %-3d %-4d %-4d %-4d %-4d %-4d %-s",
                   q->id, q->prioridad, q->Ax, q->Bx, q->Cx, q->Dx, q->Pc, q->nombre);
         fila++;
         q = q->siguiente;
@@ -396,9 +432,26 @@ static void dibujar_nuevos(WINDOW *win_nuevos, int fila_base)
     wrefresh(win_nuevos);
 }
 
+/* --- Dibujar procesos listos --- */
 static void dibujar_listos(WINDOW *win_listos, int fila_base)
 {
-    if (!win_listos) return;
+    /*werase(win_listos);
+    box(win_listos, 0, 0);
+    wattron(win_listos, COLOR_PAIR(2));
+    mvwprintw(win_listos, 0, 2, " LISTOS ");
+    wattroff(win_listos, COLOR_PAIR(2));
+
+    int fila = fila_base;
+    PCB *q = lista_listos;
+    while (q)
+    {
+        mvwprintw(win_listos, fila, 1, "%-4d %-7d %-7d %-7d %-7d %-7d %-20s %-10s%s",
+                  q->id, q->Ax, q->Bx, q->Cx, q->Dx, q->Pc,
+                  "------", q->nombre, q->status);
+        fila++;
+        q = q->siguiente;
+    }
+    wrefresh(win_listos);*/
     werase(win_listos);
     box(win_listos, 0, 0);
     wattron(win_listos, COLOR_PAIR(2));
@@ -407,11 +460,12 @@ static void dibujar_listos(WINDOW *win_listos, int fila_base)
 
     int fila = fila_base;
     PCB *q = lista_listos;
-    mvwprintw(win_listos, 1, 1, "ID  Pr   Ax      Bx      Cx      Dx      Pc      IR              nombre         Status");
-    fila = 2;
+    mvwprintw(win_listos, 1, 1, "ID  Pr  Ax       Bx       Cx       Dx       Pc       IR               nombre         Status");
+    mvwhline(win_listos, 2, 1, ACS_HLINE, COLS/2 - 4);
+    fila = 3;
     while (q)
     {
-        mvwprintw(win_listos, fila, 1, "%-3d %-3d %-7d %-7d %-7d %-7d %-7d %-18s %-14s %s",
+        mvwprintw(win_listos, fila, 1, "%-3d %-3d %-8d %-8d %-8d %-8d %-8d %-18s %-14s %s",
                   q->id, q->prioridad, q->Ax, q->Bx, q->Cx, q->Dx, q->Pc,
                   "------", q->nombre, q->status);
         fila++;
@@ -420,9 +474,26 @@ static void dibujar_listos(WINDOW *win_listos, int fila_base)
     wrefresh(win_listos);
 }
 
+/* --- Dibujar procesos terminados --- */
 static void dibujar_terminados(WINDOW *win_term, int fila_base)
 {
-    if (!win_term) return;
+    /*werase(win_term);
+    box(win_term, 0, 0);
+    wattron(win_term, COLOR_PAIR(3));
+    mvwprintw(win_term, 0, 2, " TERMINADOS ");
+    wattroff(win_term, COLOR_PAIR(3));
+
+    int fila = fila_base;
+    PCB *q = lista_terminados;
+    while (q)
+    {
+        mvwprintw(win_term, fila, 1, "%-4d %-7d %-7d %-7d %-7d %-7d %-20s %-10s%s",
+                  q->id, q->Ax, q->Bx, q->Cx, q->Dx, q->Pc,
+                  q->IR, q->nombre, q->status);
+        fila++;
+        q = q->siguiente;
+    }
+    wrefresh(win_term);*/
     werase(win_term);
     box(win_term, 0, 0);
     wattron(win_term, COLOR_PAIR(3));
@@ -431,12 +502,11 @@ static void dibujar_terminados(WINDOW *win_term, int fila_base)
 
     int fila = fila_base;
     PCB *q = lista_terminados;
-    //mvwprintw(win_term, 1, 1, "ID  Pr   Ax  Bx  Cx  Dx  Pc  IR  nombre  Status");
-    mvwprintw(win_term, 1, 1, "ID  Pr   Ax      Bx      Cx      Dx      Pc      IR              nombre         Status");
+    mvwprintw(win_term, 1, 1, "ID  Pr  Ax  Bx  Cx  Dx  Pc  IR  nombre  Status");
     fila = 2;
     while (q)
     {
-        mvwprintw(win_term, fila, 1, "%-3d %-3d %-7d %-7d %-7d %-7d %-7d %-18s %-14s %s",
+        mvwprintw(win_term, fila, 1, "%-3d %-3d %-4d %-4d %-4d %-4d %-4d %-18s %-14s %s",
                   q->id, q->prioridad, q->Ax, q->Bx, q->Cx, q->Dx, q->Pc,
                   q->IR, q->nombre, q->status);
         fila++;
@@ -445,7 +515,7 @@ static void dibujar_terminados(WINDOW *win_term, int fila_base)
     wrefresh(win_term);
 }
 
-/* ------------------ Ejecución de instrucciones ------------------ */
+/* --- Ejecución de instrucciones --- */
 static int ejecutar_instruccion_linea(PCB *p, const char *linea)
 {
     char buf[128];
@@ -646,14 +716,12 @@ static int ejecutar_instruccion_linea(PCB *p, const char *linea)
     return 0;
 }
 
-/* ------------------ Planificador corto plazo ------------------ */
 static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDOW *win_term)
 {
     // === Bucle principal (planificador a corto plazo) ===
     while ((pcb_ejecucion = pop_listo()) != NULL)
     {
         strncpy(pcb_ejecucion->status, "Ejecucion", sizeof(pcb_ejecucion->status) - 1);
-        pcb_ejecucion->status[sizeof(pcb_ejecucion->status)-1] = '\0';
         CargarContexto(pcb_ejecucion);
 
         char linea[128];
@@ -669,26 +737,86 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
             pcb_ejecucion->Pc++;
             instrucciones_ejecutadas++;
 
-            /* Control por teclado (q/ESC para terminar todo, p para pausar) */
+            // === Control por teclado ===
+            /*
+            if (kbhit())
+            {
+                int ch = getchar();
+                if (ch == 'q' || ch == 'Q' || ch == 27)
+                {
+                    mvwprintw(win_ejec, 8, 2, "[Q] Interrupción detectada. Cancelando...");
+                    wrefresh(win_ejec);
+                    usleep(800000);
+                    endwin();
+                    printf("\n\n[Ejecución interrumpida]\n");
+                    return;
+                }
+                else if (ch == 'p' || ch == 'P')
+                {
+                    wattron(win_ejec, COLOR_PAIR(4));
+                    mvwprintw(win_ejec, 8, 2, "[P] Pausado. Presiona 'R' para reanudar...");
+                    wattroff(win_ejec, COLOR_PAIR(4));
+                    wrefresh(win_ejec);
+                    int ch2;
+                    do
+                    {
+                        usleep(100000);
+                        if (kbhit())
+                        {
+                            ch2 = getchar();
+                            if (ch2 == 'r' || ch2 == 'R')
+                            {
+                                mvwprintw(win_ejec, 8, 2, "Reanudando...                                 ");
+                                wrefresh(win_ejec);
+                                break;
+                            }
+                        }
+                    } while (1);
+                }
+            }*/
+            // === Control por teclado ===
             if (kbhit())
             {
                 int ch = getchar();
 
-                // Interrupción total
-                if (ch == 'q' || ch == 'Q' || ch == 27)
+                // --- Interrupción total ---
+                if (ch == 'q' || ch == 'Q' || ch == 27) // 27 = tecla ESC
                 {
                     wattron(win_ejec, COLOR_PAIR(1));
                     mvwprintw(win_ejec, 8, 2, "[Q] Interrupción detectada. Cancelando ejecución global...");
                     wattroff(win_ejec, COLOR_PAIR(1));
                     wrefresh(win_ejec);
-                    usleep(400000);
+                    usleep(800000);
 
-                    // Liberar todas las listas
-                    liberar_lista(&lista_nuevos);
-                    liberar_lista(&lista_listos);
-                    liberar_lista(&lista_terminados);
+                    // --- Liberar procesos de todas las listas ---
+                    
+                    PCB *tmp;
+                    while (lista_nuevos)
+                    {
+                        tmp = lista_nuevos;
+                        lista_nuevos = tmp->siguiente;
+                        if (tmp->file)
+                            fclose(tmp->file);
+                        free(tmp);
+                    }
+                    while (lista_listos)
+                    {
+                        tmp = lista_listos;
+                        lista_listos = tmp->siguiente;
+                        if (tmp->file)
+                            fclose(tmp->file);
+                        free(tmp);
+                    }
+                    while (lista_terminados)
+                    {
+                        tmp = lista_terminados;
+                        lista_terminados = tmp->siguiente;
+                        if (tmp->file)
+                            fclose(tmp->file);
+                        free(tmp);
+                    } 
 
-                    // Cerrar ncurses limpiamente
+                    // --- Cerrar ncurses limpiamente ---
                     endwin();
 
                     printf("\n[Ejecución interrumpida por el usuario]\n");
@@ -696,7 +824,7 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
                     return; // <- Regresa al main() sin cerrar el programa
                 }
 
-                // Pausar ejecución
+                // --- Pausar ejecución ---
                 else if (ch == 'p' || ch == 'P')
                 {
                     wattron(win_ejec, COLOR_PAIR(4));
@@ -707,7 +835,7 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
                     int ch2;
                     while (1)
                     {
-                        usleep(500000);
+                        usleep(100000);
                         if (kbhit())
                         {
                             ch2 = getchar();
@@ -717,7 +845,7 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
                             {
                                 mvwprintw(win_ejec, 8, 2, "Reanudando ejecución...                        ");
                                 wrefresh(win_ejec);
-                                usleep(500000);
+                                usleep(300000);
                                 break;
                             }
 
@@ -726,11 +854,34 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
                             {
                                 mvwprintw(win_ejec, 8, 2, "[Q] Interrupción detectada durante pausa...");
                                 wrefresh(win_ejec);
-                                usleep(400000);
+                                usleep(800000);
 
-                                liberar_lista(&lista_nuevos);
-                                liberar_lista(&lista_listos);
-                                liberar_lista(&lista_terminados);
+                                // liberar listas
+                                PCB *tmp;
+                                while (lista_nuevos)
+                                {
+                                    tmp = lista_nuevos;
+                                    lista_nuevos = tmp->siguiente;
+                                    if (tmp->file)
+                                        fclose(tmp->file);
+                                    free(tmp);
+                                }
+                                while (lista_listos)
+                                {
+                                    tmp = lista_listos;
+                                    lista_listos = tmp->siguiente;
+                                    if (tmp->file)
+                                        fclose(tmp->file);
+                                    free(tmp);
+                                }
+                                while (lista_terminados)
+                                {
+                                    tmp = lista_terminados;
+                                    lista_terminados = tmp->siguiente;
+                                    if (tmp->file)
+                                        fclose(tmp->file);
+                                    free(tmp);
+                                }
 
                                 endwin();
                                 printf("\n[Ejecución interrumpida durante pausa]\n");
@@ -742,14 +893,14 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
                 }
             }
 
-            // === Dibujar ejecución y paneles ===
+            // === Dibujar ejecución ===
             werase(win_ejec);
             box(win_ejec, 0, 0);
             wattron(win_ejec, COLOR_PAIR(4));
             mvwprintw(win_ejec, 0, 2, " EJECUCION (Quantum = %d) ", Q);
             wattroff(win_ejec, COLOR_PAIR(4));
 
-            mvwprintw(win_ejec, 2, 2, "ID  Ax      Bx      Cx      Dx      Pc      IR                  Nombre        Estado");
+            mvwprintw(win_ejec, 2, 2, "ID   Ax      Bx      Cx      Dx      Pc      IR                  Nombre        Estado");
             mvwhline(win_ejec, 3, 2, ACS_HLINE, COLS - 6);
             mvwprintw(win_ejec, 4, 2, "%-4d %-7d %-7d %-7d %-7d %-7d %-20s %-12s %s",
                       pcb_ejecucion->id, gAx, gBx, gCx, gDx, pcb_ejecucion->Pc,
@@ -760,8 +911,7 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
 
             update_panels();
             doupdate();
-
-            usleep(500000); // ritmo de animación
+            usleep(700000);
 
             // === Manejo de fin o error ===
             if (fin == -1 || fin == 1)
@@ -774,12 +924,6 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
                 GuardarContexto(pcb_ejecucion);
                 anexar_terminado_final(pcb_ejecucion);
 
-                // Cerrar archivo del proceso que terminó y liberar memoria
-                if (pcb_ejecucion->file)
-                    fclose(pcb_ejecucion->file);
-                free(pcb_ejecucion);
-                pcb_ejecucion = NULL;
-
                 // Tras finalizar un proceso, mover nuevos a listos
                 planificador_largo_plazo();
                 dibujar_nuevos(win_nuevos, 2);
@@ -788,7 +932,14 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
                 update_panels();
                 doupdate();
 
-                goto siguiente_proceso;
+                werase(win_ejec);
+                box(win_ejec, 0, 0);
+                wattron(win_ejec, COLOR_PAIR(4));
+                mvwprintw(win_ejec, 0, 2, " EJECUCION (Quantum = %d) ", Q);
+                wattroff(win_ejec, COLOR_PAIR(4));
+                wrefresh(win_ejec);
+
+                goto finalizar_proceso;
             }
 
             // === Quantum alcanzado ===
@@ -796,30 +947,22 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
             {
                 GuardarContexto(pcb_ejecucion);
                 strncpy(pcb_ejecucion->status, "Listo", sizeof(pcb_ejecucion->status) - 1);
-                pcb_ejecucion->status[sizeof(pcb_ejecucion->status)-1] = '\0';
-
-                /* Re-encolar según prioridad */
                 push_listo(pcb_ejecucion);
                 pcb_ejecucion = NULL;
                 break;
             }
-        } // fin while fgets
+        }
 
-        /* Si se salió del while de lectura sin haber terminado (por EOF),
-           pero pcb_ejecucion aún existe, entonces cerrarlo y anexarlo a terminados. */
+        // === Finalizar proceso ===
         if (pcb_ejecucion)
         {
-            // Si el archivo llegó a su fin sin encontrar END, lo tratamos como final correcto
-            GuardarContexto(pcb_ejecucion);
-            strncpy(pcb_ejecucion->status, "Correcto", sizeof(pcb_ejecucion->status) - 1);
-            anexar_terminado_final(pcb_ejecucion);
+        finalizar_proceso:
             if (pcb_ejecucion->file)
                 fclose(pcb_ejecucion->file);
             free(pcb_ejecucion);
             pcb_ejecucion = NULL;
         }
 
-    siguiente_proceso:
         // Al liberar un proceso, revisar si hay nuevos que puedan pasar
         planificador_largo_plazo();
         dibujar_nuevos(win_nuevos, 2);
@@ -827,22 +970,41 @@ static void planificador_corto_plazo(WINDOW *win_ejec, WINDOW *win_listos, WINDO
         dibujar_terminados(win_term, 2);
         update_panels();
         doupdate();
-    } // fin while pop_listo != NULL
+    }
 }
 
-/* ------------------ Ejecución completa con quantum y paneles ncurses ------------------ */
+/* --- Ejecución completa con quantum (Q) y paneles ncurses --- */
 int ejecutar_archivo(const char *ruta_mult)
 {
-    // === Limpieza previa de listas (por si se reusa la función) ===
-    liberar_lista(&lista_listos);
-    liberar_lista(&lista_terminados);
-    liberar_lista(&lista_nuevos);
-    lista_nuevos = lista_listos = lista_terminados = NULL;
-
-    // Inicializar generador aleatorio para prioridades (una vez)
-    srand((unsigned int)time(NULL));
+    // === Limpiar listas previas ===
+    while (lista_listos)
+    {
+        PCB *t = lista_listos;
+        lista_listos = t->siguiente;
+        if (t->file)
+            fclose(t->file);
+        free(t);
+    }
+    while (lista_terminados)
+    {
+        PCB *t = lista_terminados;
+        lista_terminados = t->siguiente;
+        free(t);
+    }
+    // Asegurarnos de limpiar tambien 'nuevos' por si hubiera restos
+    while (lista_nuevos)
+    {
+        PCB *t = lista_nuevos;
+        lista_nuevos = t->siguiente;
+        if (t->file)
+            fclose(t->file);
+        free(t);
+    }
+    lista_nuevos = NULL;
 
     // === Cargar múltiples archivos ASM ===
+    /* Inicializar generador aleatorio para prioridades (una vez por ejecución) */
+    srand((unsigned int)time(NULL));
     char tmp[1024];
     strncpy(tmp, ruta_mult, sizeof(tmp) - 1);
     tmp[sizeof(tmp) - 1] = '\0';
@@ -855,23 +1017,12 @@ int ejecutar_archivo(const char *ruta_mult)
         if (!f)
         {
             printf("No se pudo abrir: %s\n", tok);
+            // continuar con el resto en lugar de abortar totalmente
             tok = strtok(NULL, " ");
             continue;
         }
         PCB *p = (PCB *)malloc(sizeof(PCB));
-        if (!p)
-        {
-            fclose(f);
-            printf("Error: malloc PCB\n");
-            tok = strtok(NULL, " ");
-            continue;
-        }
-
-        crear_PCB(p, proc_id++, tok, f); // crea el PCB (seguramente inicializa campos)
-        /* Si tu crear_PCB NO inicializa p->prioridad, asignamos aquí un valor aleatorio 1..4 */
-        if (p->prioridad < 1 || p->prioridad > 4)
-            p->prioridad = (rand() % 4) + 1;
-
+        crear_PCB(p, proc_id++, tok, f); // asumo que crear_PCB deja f en p->file
         push_nuevo(p);
         tok = strtok(NULL, " ");
     }
@@ -893,22 +1044,23 @@ int ejecutar_archivo(const char *ruta_mult)
     int mid_x = COLS / 2;
     int mid_y = LINES / 2;
 
-    win_ejecucion = newwin(8, COLS - 2, 1, 1);
+    // Usamos las variables globales (declaradas fuera en el header)
+    win_ejec = newwin(8, COLS - 2, 1, 1);
     win_nuevos = newwin((mid_y - 12 > 4 ? mid_y - 12 : 4), mid_x - 2, 10, 1);
     win_listos = newwin((mid_y - 12 > 4 ? mid_y - 12 : 4), mid_x - 2, 10, mid_x + 1);
-    win_terminados = newwin(LINES - mid_y - 2 > 4 ? LINES - mid_y - 2 : 4, COLS - 2, mid_y + 1, 1);
+    win_term = newwin(LINES - mid_y - 2 > 4 ? LINES - mid_y - 2 : 4, COLS - 2, mid_y + 1, 1);
 
-    // Crear panels
-    PANEL *pnl_ejec = new_panel(win_ejecucion);
+    // Crear panels (pueden ser locales)
+    PANEL *pnl_ejec = new_panel(win_ejec);
     PANEL *pnl_nuevos = new_panel(win_nuevos);
     PANEL *pnl_listos = new_panel(win_listos);
-    PANEL *pnl_term = new_panel(win_terminados);
+    PANEL *pnl_term = new_panel(win_term);
 
     // Dibujar bordes y títulos
-    box(win_ejecucion, 0, 0);
-    wattron(win_ejecucion, COLOR_PAIR(4));
-    mvwprintw(win_ejecucion, 0, 2, " EJECUCION (Quantum = %d) ", Q);
-    wattroff(win_ejecucion, COLOR_PAIR(4));
+    box(win_ejec, 0, 0);
+    wattron(win_ejec, COLOR_PAIR(4));
+    mvwprintw(win_ejec, 0, 2, " EJECUCION (Quantum = %d) ", Q);
+    wattroff(win_ejec, COLOR_PAIR(4));
 
     box(win_nuevos, 0, 0);
     wattron(win_nuevos, COLOR_PAIR(5));
@@ -920,10 +1072,10 @@ int ejecutar_archivo(const char *ruta_mult)
     mvwprintw(win_listos, 0, 2, " LISTOS ");
     wattroff(win_listos, COLOR_PAIR(2));
 
-    box(win_terminados, 0, 0);
-    wattron(win_terminados, COLOR_PAIR(3));
-    mvwprintw(win_terminados, 0, 2, " TERMINADOS ");
-    wattroff(win_terminados, COLOR_PAIR(3));
+    box(win_term, 0, 0);
+    wattron(win_term, COLOR_PAIR(3));
+    mvwprintw(win_term, 0, 2, " TERMINADOS ");
+    wattroff(win_term, COLOR_PAIR(3));
 
     update_panels();
     doupdate();
@@ -941,6 +1093,7 @@ int ejecutar_archivo(const char *ruta_mult)
     doupdate();
 
     // === Bucle principal de la simulación ===
+    // Ejecutamos el corto plazo tantas veces como sea necesario mientras haya trabajo
     while (lista_listos != NULL || lista_nuevos != NULL)
     {
         // Si no hay procesos listos pero hay nuevos, intentar moverlos
@@ -954,7 +1107,7 @@ int ejecutar_archivo(const char *ruta_mult)
         }
 
         // Ejecuta el planificador corto (procesa todos los listos disponibles)
-        planificador_corto_plazo(win_ejecucion, win_listos, win_terminados);
+        planificador_corto_plazo(win_ejec, win_listos, win_term);
 
         // Después de una ejecución corta, intentar mover nuevos a listos (si hay espacio)
         planificador_largo_plazo();
@@ -962,21 +1115,21 @@ int ejecutar_archivo(const char *ruta_mult)
         // Redibujar todo
         dibujar_nuevos(win_nuevos, 2);
         dibujar_listos(win_listos, 2);
-        dibujar_terminados(win_terminados, 2);
+        dibujar_terminados(win_term, 2);
         update_panels();
         doupdate();
 
         // pequeña pausa para evitar loop demasiado rápido (opcional)
-        usleep(500000);
+        usleep(100000);
     }
 
     // === Mensaje final ===
-    werase(win_ejecucion);
-    box(win_ejecucion, 0, 0);
-    wattron(win_ejecucion, COLOR_PAIR(2));
-    mvwprintw(win_ejecucion, 1, 2, "Ejecución finalizada. Presiona una tecla para salir...");
-    wattroff(win_ejecucion, COLOR_PAIR(2));
-    wrefresh(win_ejecucion);
+    werase(win_ejec);
+    box(win_ejec, 0, 0);
+    wattron(win_ejec, COLOR_PAIR(2));
+    mvwprintw(win_ejec, 1, 2, "Ejecución finalizada. Presiona una tecla para salir...");
+    wattroff(win_ejec, COLOR_PAIR(2));
+    wrefresh(win_ejec);
     getch();
 
     // === Limpieza ===
@@ -985,20 +1138,15 @@ int ejecutar_archivo(const char *ruta_mult)
     del_panel(pnl_listos);
     del_panel(pnl_term);
 
-    delwin(win_ejecucion);
+    delwin(win_ejec);
     delwin(win_nuevos);
     delwin(win_listos);
-    delwin(win_terminados);
+    delwin(win_term);
 
-    win_ejecucion = win_nuevos = win_listos = win_terminados = NULL;
+    // dejar punteros globals a NULL por seguridad
+    win_ejec = win_nuevos = win_listos = win_term = NULL;
 
     endwin();
-
-    // Liberar cualquier resto (seguridad)
-    liberar_lista(&lista_nuevos);
-    liberar_lista(&lista_listos);
-    liberar_lista(&lista_terminados);
-
     return 0;
 }
 

@@ -1,6 +1,6 @@
 MOV Ax, 10
 ADD Bx, 20
-SUB Ex,Cx 30
+SUB Cx, 30
 MUL Dx, 40
 DIV Ax, 1
 INC Ax
